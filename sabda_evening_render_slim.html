@@ -691,7 +691,8 @@ window.SABDA_RENDER_FRAME = function(simTime) {
 
   // ── SKY WARMTH ──
   const skyPhase = (time/1800)*Math.PI*2;
-  const warmth = (Math.sin(skyPhase)+1)/2;
+  const warmthRaw = (Math.sin(skyPhase)+1)/2;
+  const warmth = Math.pow(warmthRaw, 2.0);  // squash toward 0 = Belfast dominates ~70%
   skySphereMat.uniforms.mixVal.value = 1.0 - warmth;  // warmth=1 → sky A (evening), warmth=0 → sky B (belfast)
   skySphereMat.uniforms.tintColor.value.setRGB(0.85+warmth*0.15, 0.82+warmth*0.10, 0.88+(1-warmth)*0.12);
   sun.intensity = 0.5+warmth*0.4+b*0.1;
@@ -868,7 +869,7 @@ if (!window.__SABDA_PUPPETEER__) {
     if (!scrubbing) slider.value = liveT;
 
     const mins = Math.floor(liveT/60), secs = Math.floor(liveT%60);
-    const warmth = (Math.sin((liveT/1800)*Math.PI*2)+1)/2;
+    const warmth = Math.pow((Math.sin((liveT/1800)*Math.PI*2)+1)/2, 2.0);
     const mix = 1.0 - warmth;
     info.textContent = `${mins}:${secs.toString().padStart(2,'0')} / 30:00  warmth=${warmth.toFixed(2)}  mix=${mix.toFixed(2)} (${mix<0.1?'Evening':mix>0.9?'Belfast':'blend'})`;
 
