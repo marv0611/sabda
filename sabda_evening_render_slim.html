@@ -811,8 +811,13 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     const maxTurn = 0.03 * dt * 30;  // scales with speed
     bd.turnRate=Math.max(-maxTurn,Math.min(maxTurn,bd.turnRate));
     bd.heading+=bd.turnRate;bd.ctr.position.x+=Math.sin(bd.heading)*bd.cruiseSpeed*dt*30;bd.ctr.position.z+=Math.cos(bd.heading)*bd.cruiseSpeed*dt*30;
-    // Hard boundary — if still escaping, snap heading inward
-    if(dist>40){bd.heading=Math.atan2(-pz,-px)+((Math.random()-0.5)*0.3);}
+    // Hard boundary — teleport back to home orbit pointing inward (they're offscreen at this distance)
+    if(dist>40){
+      const a = Math.random() * Math.PI * 2;
+      bd.ctr.position.x = Math.cos(a) * bd.homeDist;
+      bd.ctr.position.z = Math.sin(a) * bd.homeDist;
+      bd.heading = a + Math.PI/2 + (Math.random()-0.5)*0.5;
+    }
     // Bird fade — SIMPLIFIED: always visible, no loop boundary handling for now
     bd.ctr.scale.setScalar(1);
     bd.ctr.visible = true;
