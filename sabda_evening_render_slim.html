@@ -805,10 +805,14 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     if(bd.turnChangeTimer<=0){bd.desiredTurnRate=(Math.random()-0.5)*0.025;if(Math.random()<0.25)bd.desiredTurnRate*=0.15;bd.turnChangeTimer=6+Math.random()*9;}
     const px=bd.ctr.position.x,pz=bd.ctr.position.z,dist=Math.sqrt(px*px+pz*pz);
     let btb=0;
-    if(dist>bd.homeDist+5){const tc=Math.atan2(-pz,-px);let hd=tc-bd.heading;while(hd>Math.PI)hd-=Math.PI*2;while(hd<-Math.PI)hd+=Math.PI*2;btb=hd*0.008*(1+Math.min(1,(dist-bd.homeDist-5)*0.05)*3);}
+    if(dist>bd.homeDist+3){const tc=Math.atan2(-pz,-px);let hd=tc-bd.heading;while(hd>Math.PI)hd-=Math.PI*2;while(hd<-Math.PI)hd+=Math.PI*2;btb=hd*0.015*(1+Math.min(2,(dist-bd.homeDist-3)*0.1)*4);}
     if(dist<10){const aa=Math.atan2(pz,px);let ad=aa-bd.heading;while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;btb=ad*0.01;}
-    bd.turnRate+=(bd.desiredTurnRate+btb-bd.turnRate)*0.4*dt;bd.turnRate=Math.max(-0.03,Math.min(0.03,bd.turnRate));
-    bd.heading+=bd.turnRate*dt;bd.ctr.position.x+=Math.sin(bd.heading)*bd.cruiseSpeed*dt*30;bd.ctr.position.z+=Math.cos(bd.heading)*bd.cruiseSpeed*dt*30;
+    bd.turnRate+=(bd.desiredTurnRate+btb-bd.turnRate)*0.4*dt;
+    const maxTurn = 0.03 * dt * 30;  // scales with speed
+    bd.turnRate=Math.max(-maxTurn,Math.min(maxTurn,bd.turnRate));
+    bd.heading+=bd.turnRate;bd.ctr.position.x+=Math.sin(bd.heading)*bd.cruiseSpeed*dt*30;bd.ctr.position.z+=Math.cos(bd.heading)*bd.cruiseSpeed*dt*30;
+    // Hard boundary — if still escaping, snap heading inward
+    if(dist>40){bd.heading=Math.atan2(-pz,-px)+((Math.random()-0.5)*0.3);}
     // Bird fade — SIMPLIFIED: always visible, no loop boundary handling for now
     bd.ctr.scale.setScalar(1);
     bd.ctr.visible = true;
@@ -822,7 +826,7 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     // Clamp vy to prevent runaway velocity
     bd.vy = Math.max(-0.15, Math.min(0.15, bd.vy));
     // Distance boundary — if bird drifts too far, flip heading inward
-    if(dist>40){bd.heading=Math.atan2(-pz,-px)+((Math.random()-0.5)*0.5);bd.ctr.position.x=Math.cos(bd.heading+Math.PI)*38;bd.ctr.position.z=Math.sin(bd.heading+Math.PI)*38;}
+    // Distance boundary handled above in steering section
     bd.bankAngle+=(-bd.turnRate*5-bd.bankAngle)*1.5*dt;bd.ctr.rotation.z=bd.bankAngle;
     bd.pitchAngle+=(-bd.vy*2.5-bd.pitchAngle)*1.5*dt;bd.ctr.rotation.x=bd.pitchAngle;bd.ctr.rotation.y=bd.heading;
     }
