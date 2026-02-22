@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SABDA — Watchout 4-Wall Output (Evening Road)</title>
+<style>
+*{margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#000}
+canvas{position:absolute;top:0;left:0}
+#loading{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;
+  align-items:center;justify-content:center;background:#0e0a0d;z-index:100;
+  font-family:'Georgia',serif;color:#c4a882;font-size:1.2rem;letter-spacing:0.2em;
+  transition:opacity 2s ease-out}
+#loading.done{opacity:0;pointer-events:none}
+#fps{position:fixed;top:8px;left:8px;z-index:50;font-family:monospace;
+  color:rgba(255,255,255,0.5);font-size:11px;background:rgba(0,0,0,0.4);
+  padding:4px 8px;border-radius:4px;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="loading">S A B D A — Watchout</div>
+<div id="fps"></div>
+
+<!-- ═══ EMBEDDED ASSETS ═══ -->
+<script id="skydata" type="text/plain">ASSET_PLACEHOLDER</script>
+<script id="birdsdata" type="text/plain">ASSET_PLACEHOLDER</script>
+<script id="planetdata" type="text/plain">ASSET_PLACEHOLDER</script>
+<script id="saturndata" type="text/plain">ASSET_PLACEHOLDER</script>
+
+<script type="importmap">{"imports":{
+  "three":"https://unpkg.com/three@0.162.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.162.0/examples/jsm/"
+}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+
+/* ═══════════════════════════════════════════════════════════════════
+   SABDA Watchout 4-Wall Output — Evening Road v11
+   
+   Matches Unity Spout layout exactly:
+   ┌─────────────────────┬────────────┐
+   │  Left (5008×1200)   │Front(1920) │  ← top row
+   ├─────────────────────┼────────────┤
+   │  Right (5008×1200)  │Back (1920) │  ← bottom row
+   └─────────────────────┴────────────┘
+   Total canvas: 6928 × 2400
+   
+   OBS crops 4 regions → 4 Spout senders:
+     SpoutFront = top-right   (x:5008, y:0,    w:1920, h:1200)
+     SpoutBack  = bot-right   (x:5008, y:1200, w:1920, h:1200)
+     SpoutLeft  = top-left    (x:0,    y:0,    w:5008, h:1200)
+     SpoutRight = bot-left    (x:0,    y:1200, w:5008, h:1200)
+   
+   Zero Watchout config change needed — same 4 Spout source names.
+   ═══════════════════════════════════════════════════════════════════ */
+
+// ── WALL DIMENSIONS (from Unity Spout) ──
+const W_LEFT   = 5008, H_WALL = 1200;
+const W_RIGHT  = 5008;
+const W_FRONT  = 1920;
+const W_BACK   = 1920;
+const OUT_W = W_LEFT + W_FRONT;   // 6928
+const OUT_H = H_WALL * 2;  // 2400
+
+// ── SABDA ROOM GEOMETRY (for azimuth mapping) ──
+const ROOM_L = 15.00;   // long walls (Left/Right)
+const ROOM_W = 5.63;    // short walls (Front/Back)
+const PERIM = 2 * ROOM_L + 2 * ROOM_W;  // 41.26m
+
+// Wall order in the 360° panorama (azimuth 0 = centre of Front wall C):
+// Front C: 0 to ROOM_W/PERIM
+// Right D: ROOM_W/PERIM to (ROOM_W+ROOM_L)/PERIM
+// Back A:  (ROOM_W+ROOM_L)/PERIM to (2*ROOM_W+ROOM_L)/PERIM
+// Left B:  (2*ROOM_W+ROOM_L)/PERIM to 1.0
+const uF = ROOM_W / PERIM;                    // 0.1364
+const uR = (ROOM_W + ROOM_L) / PERIM;         // 0.5000
+const uB = (2 * ROOM_W + ROOM_L) / PERIM;     // 0.6364
+// Left goes from uB to 1.0
+
+const BREATH = 14, CCYCLE = 90;
+const EYE_H = 1.6;
+
+// ═══════════════════════════════════════════════════════
+// RENDERER
+// ═══════════════════════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  powerPreference: 'high-performance',
+});
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setPixelRatio(1);
+renderer.setSize(OUT_W, OUT_H);
+document.body.appendChild(renderer.domElement);
+
+// ═══════════════════════════════════════════════════════
+// CONTENT SCENE
+// ═══════════════════════════════════════════════════════
+const contentScene = new THREE.Scene();
+
+const CUBE_SIZE = 4096;
+const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
+  generateMipmaps: true,
+  minFilter: THREE.LinearMipmapLinearFilter,
+  type: THREE.UnsignedByteType,
+});
+const cubeCamera = new THREE.CubeCamera(0.05, 500, cubeRT);
+cubeCamera.position.set(0, EYE_H, 0);
+contentScene.add(cubeCamera);
+
+// ═══════════════════════════════════════════════════════
+// 4 EQUIRECT WALL RENDER TARGETS
+// Each wall gets its own RT at exact Unity resolution
+// ═══════════════════════════════════════════════════════
+const VFOV_RAD = 62.5 * Math.PI / 180.0;
+const ELEV_OFFSET = 3.0 * Math.PI / 180.0;
+
+function makeWallRT(w, h) {
+  return new THREE.WebGLRenderTarget(w, h, {
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    colorSpace: THREE.SRGBColorSpace,
+  });
+}
+
+const rtFront = makeWallRT(W_FRONT, H_WALL);
+const rtBack  = makeWallRT(W_BACK, H_WALL);
+const rtLeft  = makeWallRT(W_LEFT, H_WALL);
+const rtRight = makeWallRT(W_RIGHT, H_WALL);
+
+// Equirect shader — renders a specific azimuth range from the cubemap
+function makeEquirectMat(azStartFrac, azEndFrac) {
+  const azStart = azStartFrac * Math.PI * 2;
+  const azEnd   = azEndFrac * Math.PI * 2;
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      tCube: { value: null },
+      vFovRad: { value: VFOV_RAD },
+      elevOffset: { value: ELEV_OFFSET },
+      azStart: { value: azStart },
+      azRange: { value: azEnd - azStart },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+    `,
+    fragmentShader: `
+      precision highp float;
+      uniform samplerCube tCube;
+      uniform float vFovRad, elevOffset, azStart, azRange;
+      varying vec2 vUv;
+      float dither(vec2 co) {
+        return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+      }
+      void main() {
+        float azimuth = azStart + vUv.x * azRange;
+        float elevation = (vUv.y - 0.5) * vFovRad + elevOffset;
+        float ce = cos(elevation);
+        vec3 dir = vec3(sin(azimuth) * ce, sin(elevation), -cos(azimuth) * ce);
+        vec4 col = textureCube(tCube, dir);
+        col.rgb += dither(gl_FragCoord.xy) / 255.0;
+        gl_FragColor = col;
+      }
+    `,
+    depthWrite: false, depthTest: false,
+  });
+}
+
+// Each wall's azimuth range (fraction of 360°)
+const matFront = makeEquirectMat(0.0, uF);
+const matRight = makeEquirectMat(uF, uR);
+const matBack  = makeEquirectMat(uR, uB);
+const matLeft  = makeEquirectMat(uB, 1.0);
+
+// Fullscreen quads for each wall render
+function makeEquirectScene(mat) {
+  const s = new THREE.Scene();
+  s.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+  return s;
+}
+const eqScnFront = makeEquirectScene(matFront);
+const eqScnRight = makeEquirectScene(matRight);
+const eqScnBack  = makeEquirectScene(matBack);
+const eqScnLeft  = makeEquirectScene(matLeft);
+const eqCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+// ═══════════════════════════════════════════════════════
+// COMPOSITE SCENE — blit 4 wall textures onto final canvas
+// Layout: Left+Front on top, Right+Back on bottom
+// ═══════════════════════════════════════════════════════
+const compScene = new THREE.Scene();
+const compCam = new THREE.OrthographicCamera(0, OUT_W, OUT_H, 0, -1, 1);
+
+function makeQuad(rt, x, y, w, h) {
+  const mat = new THREE.MeshBasicMaterial({ map: rt.texture });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+  mesh.position.set(x + w/2, y + h/2, 0);
+  return mesh;
+}
+
+// Top row: Left (0,1200) then Front (5008,1200)
+compScene.add(makeQuad(rtLeft,  0,       H_WALL, W_LEFT,  H_WALL));
+compScene.add(makeQuad(rtFront, W_LEFT,  H_WALL, W_FRONT, H_WALL));
+// Bottom row: Right (0,0) then Back (5008,0)
+compScene.add(makeQuad(rtRight, 0,       0,      W_RIGHT, H_WALL));
+compScene.add(makeQuad(rtBack,  W_RIGHT, 0,      W_BACK,  H_WALL));
+
+// ── GUIDE OVERLAYS (toggle with D key) ──
+const guideGroup = new THREE.Group();
+
+// Horizontal divider
+const divGeo = new THREE.PlaneGeometry(OUT_W, 3);
+const divMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+const divLine = new THREE.Mesh(divGeo, divMat);
+divLine.position.set(OUT_W/2, H_WALL/2, 0.1);
+guideGroup.add(divLine);
+
+// Vertical divider
+const vdivGeo = new THREE.PlaneGeometry(3, OUT_H);
+const vdivLine = new THREE.Mesh(vdivGeo, divMat);
+vdivLine.position.set(W_LEFT, OUT_H/2, 0.1);
+guideGroup.add(vdivLine);
+
+// Labels
+function makeLabel(text, x, y) {
+  const cvs = document.createElement('canvas');
+  cvs.width = 512; cvs.height = 48;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, 512, 48);
+  ctx.font = 'bold 28px monospace';
+  ctx.fillStyle = '#ff3333';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 256, 24);
+  const tex = new THREE.CanvasTexture(cvs);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(280, 30), mat);
+  mesh.position.set(x, y, 0.2);
+  return mesh;
+}
+guideGroup.add(makeLabel('LEFT (5008×1200)',  W_LEFT/2,  OUT_H - 25));
+guideGroup.add(makeLabel('FRONT (1920×1200)', W_LEFT + W_FRONT/2, OUT_H - 25));
+guideGroup.add(makeLabel('RIGHT (5008×1200)', W_RIGHT/2, H_WALL - 25));
+guideGroup.add(makeLabel('BACK (1920×1200)',  W_RIGHT + W_BACK/2, H_WALL - 25));
+
+// guideGroup removed for render;
+
+let showGuides = true;
+document.addEventListener('keydown', e => {
+  if (e.key === 'd' || e.key === 'D') {
+    showGuides = !showGuides;
+    guideGroup.visible = showGuides;
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// CONTENT SCENE ELEMENTS (identical to v11)
+// ═══════════════════════════════════════════════════════
+
+// ── SKY ──
+const tl = new THREE.TextureLoader();
+function b64T(id, m) {
+  const t = tl.load('data:' + m + ';base64,' + document.getElementById(id).textContent.trim());
+  t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const skyTex = b64T('skydata', 'image/png');
+skyTex.mapping = THREE.EquirectangularReflectionMapping;
+skyTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+skyTex.minFilter = THREE.LinearMipmapLinearFilter;
+skyTex.magFilter = THREE.LinearFilter;
+skyTex.generateMipmaps = true;
+
+const skySphereGeo = new THREE.SphereGeometry(400, 64, 32);
+const skySphereMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false });
+const skySphere = new THREE.Mesh(skySphereGeo, skySphereMat);
+contentScene.add(skySphere);
+contentScene.background = null;
+contentScene.environment = skyTex;
+
+// ── LIGHTING ──
+const ambient = new THREE.AmbientLight(0x6a5540, 0.4); contentScene.add(ambient);
+const hemi = new THREE.HemisphereLight(0xc48040, 0x1a2520, 0.4); contentScene.add(hemi);
+const sun = new THREE.DirectionalLight(0xff9050, 0.8); sun.position.set(10, 15, -8); contentScene.add(sun);
+const rim = new THREE.DirectionalLight(0x405080, 0.3); rim.position.set(-10, 8, 8); contentScene.add(rim);
+const fill = new THREE.DirectionalLight(0xcc6030, 0.2); fill.position.set(0, 5, 15); contentScene.add(fill);
+
+// ── FOG ──
+contentScene.fog = new THREE.FogExp2(0x9a7a90, 0.003);
+
+// ── STAR FIELD ──
+const STAR_COUNT = 200;
+const starGeo = new THREE.BufferGeometry();
+const starPos = new Float32Array(STAR_COUNT * 3);
+const starSizes = new Float32Array(STAR_COUNT);
+for (let i = 0; i < STAR_COUNT; i++) {
+  const theta = Math.random() * Math.PI * 2;
+  const elev = (15 + Math.random() * 70) * Math.PI / 180;
+  const r = 350 + Math.random() * 40;
+  starPos[i*3] = Math.cos(elev)*Math.cos(theta)*r;
+  starPos[i*3+1] = Math.sin(elev)*r;
+  starPos[i*3+2] = Math.cos(elev)*Math.sin(theta)*r;
+  starSizes[i] = 1.0 + Math.random() * 2.5;
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+const starMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uOpacity: { value: 0 } },
+  vertexShader: `
+    attribute float size; varying float vTwinkle; uniform float uTime;
+    void main() {
+      vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+      vTwinkle = 0.5 + 0.5 * sin(uTime * (1.5 + position.x * 0.01) + position.y * 0.02);
+      gl_PointSize = size * (6.0 / -mvPos.z);
+      gl_Position = projectionMatrix * mvPos;
+    }
+  `,
+  fragmentShader: `
+    uniform float uOpacity; varying float vTwinkle;
+    void main() {
+      float d = length(gl_PointCoord - vec2(0.5));
+      if (d > 0.5) discard;
+      gl_FragColor = vec4(0.95, 0.92, 1.0, smoothstep(0.5, 0.0, d) * vTwinkle * uOpacity);
+    }
+  `,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+});
+const starField = new THREE.Points(starGeo, starMat);
+starField.frustumCulled = false;
+contentScene.add(starField);
+
+// ── GOD RAYS ──
+const rayGroup = new THREE.Group();
+const rayMeshes = [];
+for (let i = 0; i < 3; i++) {
+  const angle = -0.3 + (i / 2) * 0.6;
+  const width = 40 + Math.random() * 30, height = 80 + Math.random() * 60;
+  const cvs = document.createElement('canvas'); cvs.width = 4; cvs.height = 128;
+  const ctx = cvs.getContext('2d');
+  const grd = ctx.createLinearGradient(0, 128, 0, 0);
+  grd.addColorStop(0, 'rgba(255,200,120,0.04)');
+  grd.addColorStop(0.2, 'rgba(255,180,100,0.025)');
+  grd.addColorStop(0.5, 'rgba(255,160,80,0.008)');
+  grd.addColorStop(1.0, 'rgba(255,140,60,0.0)');
+  ctx.fillStyle = grd; ctx.fillRect(0, 0, 4, 128);
+  const mat = new THREE.MeshBasicMaterial({
+    map: new THREE.CanvasTexture(cvs), transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+  const dist = 200;
+  mesh.position.set(Math.sin(angle)*dist, height*0.3, -Math.cos(angle)*dist);
+  mesh.rotation.x = -0.15 + Math.random()*0.1;
+  mesh.rotation.y = angle;
+  mesh.rotation.z = (Math.random()-0.5)*0.08;
+  rayMeshes.push(mesh); rayGroup.add(mesh);
+}
+contentScene.add(rayGroup);
+
+// ── SHOOTING STAR ──
+const shootingStarState = {
+  active: false, timer: 8,
+  pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, maxLife: 0,
+};
+const ssHeadMat = new THREE.MeshBasicMaterial({ color: 0xfff8e0, fog: false, toneMapped: false });
+const ssHead = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 8), ssHeadMat);
+ssHead.visible = false; contentScene.add(ssHead);
+const ssTailMat = new THREE.MeshBasicMaterial({ color: 0xffe0a0, fog: false, transparent: true, opacity: 0.7, toneMapped: false });
+const ssTail = new THREE.Mesh(new THREE.CylinderGeometry(0.0, 1.2, 1.0, 8, 1), ssTailMat);
+ssTail.visible = false; contentScene.add(ssTail);
+
+// ── DUST PARTICLES ──
+const DUST_COUNT = 250;
+const dustGeo = new THREE.BufferGeometry();
+const dustPositions = new Float32Array(DUST_COUNT * 3);
+const dustSizes = new Float32Array(DUST_COUNT);
+const dustSpeeds = new Float32Array(DUST_COUNT * 3);
+const dustPhases = new Float32Array(DUST_COUNT);
+for (let i = 0; i < DUST_COUNT; i++) {
+  const theta = Math.random()*Math.PI*2, phi = Math.acos(2*Math.random()-1), r = 3+Math.random()*27;
+  dustPositions[i*3] = Math.sin(phi)*Math.cos(theta)*r;
+  dustPositions[i*3+1] = Math.sin(phi)*Math.sin(theta)*r;
+  dustPositions[i*3+2] = Math.cos(phi)*r;
+  dustSizes[i] = (1.0-(r-3)/27)*1.7+0.8;
+  dustSpeeds[i*3] = (Math.random()-0.5)*0.003;
+  dustSpeeds[i*3+1] = 0.001+Math.random()*0.003;
+  dustSpeeds[i*3+2] = (Math.random()-0.5)*0.003;
+  dustPhases[i] = Math.random()*Math.PI*2;
+}
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
+dustGeo.setAttribute('size', new THREE.BufferAttribute(dustSizes, 1));
+const dustMat = new THREE.ShaderMaterial({
+  uniforms: { uTime:{value:0}, uColor:{value:new THREE.Color(0xffe0a0)}, uOpacity:{value:0.35} },
+  vertexShader: `
+    attribute float size; uniform float uTime; varying float vAlpha;
+    void main() {
+      vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+      float dist = length(mvPos.xyz);
+      vAlpha = smoothstep(2.0,5.0,dist)*(1.0-smoothstep(25.0,35.0,dist))*(0.7+0.3*sin(uTime*1.5+position.x*3.0+position.y*2.0));
+      gl_PointSize = size*(8.0/-mvPos.z);
+      gl_Position = projectionMatrix * mvPos;
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 uColor; uniform float uOpacity; varying float vAlpha;
+    void main() {
+      float d = length(gl_PointCoord-vec2(0.5));
+      if(d>0.5) discard;
+      gl_FragColor = vec4(uColor, (1.0-d*2.0)*vAlpha*uOpacity);
+    }
+  `,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const dustSystem = new THREE.Points(dustGeo, dustMat);
+dustSystem.frustumCulled = false;
+contentScene.add(dustSystem);
+
+// ── PLANET ──
+let planetMixer = null, glowMat = null;
+const planetGroup = new THREE.Group();
+const plDist = 85, plAngle = Math.PI + 0.85, plElev = 15*Math.PI/180;
+planetGroup.position.set(Math.cos(plAngle)*Math.cos(plElev)*plDist, Math.sin(plElev)*plDist, Math.sin(plAngle)*Math.cos(plElev)*plDist);
+planetGroup.scale.setScalar(13.5); planetGroup.rotation.z = 0.12; planetGroup.rotation.x = -0.08;
+const glowCanvas = document.createElement('canvas'); glowCanvas.width=512; glowCanvas.height=512;
+const gCtx = glowCanvas.getContext('2d');
+const g1 = gCtx.createRadialGradient(256,256,0,256,256,256);
+g1.addColorStop(0,'rgba(200,160,240,0.3)'); g1.addColorStop(0.05,'rgba(190,150,230,0.2)');
+g1.addColorStop(0.15,'rgba(170,130,210,0.08)'); g1.addColorStop(0.3,'rgba(150,110,190,0.02)');
+g1.addColorStop(0.5,'rgba(130,90,170,0.0)'); g1.addColorStop(1.0,'rgba(100,60,140,0.0)');
+gCtx.fillStyle=g1; gCtx.fillRect(0,0,512,512);
+glowMat = new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(glowCanvas), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, fog:false });
+const glowSprite = new THREE.Sprite(glowMat); glowSprite.scale.setScalar(6.0);
+planetGroup.add(glowSprite); contentScene.add(planetGroup);
+
+// ── SATURN STAR ──
+const saturnGroup = new THREE.Group();
+saturnGroup.position.set(Math.cos(0)*Math.cos(18*Math.PI/180)*85, Math.sin(18*Math.PI/180)*85, Math.sin(0)*Math.cos(18*Math.PI/180)*85);
+saturnGroup.scale.setScalar(10); saturnGroup.rotation.x=-0.25; saturnGroup.rotation.z=0.15;
+const satGlowCvs = document.createElement('canvas'); satGlowCvs.width=512; satGlowCvs.height=512;
+const sgCtx = satGlowCvs.getContext('2d');
+const sg1 = sgCtx.createRadialGradient(256,256,0,256,256,256);
+sg1.addColorStop(0,'rgba(240,200,140,0.25)'); sg1.addColorStop(0.05,'rgba(230,190,130,0.15)');
+sg1.addColorStop(0.15,'rgba(210,170,110,0.06)'); sg1.addColorStop(0.3,'rgba(190,150,100,0.015)');
+sg1.addColorStop(0.5,'rgba(170,130,80,0.0)'); sg1.addColorStop(1.0,'rgba(140,100,60,0.0)');
+sgCtx.fillStyle=sg1; sgCtx.fillRect(0,0,512,512);
+const satGlowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(satGlowCvs), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, fog:false }));
+satGlowSprite.scale.setScalar(5.5); saturnGroup.add(satGlowSprite); contentScene.add(saturnGroup);
+
+// ── SATURN MAIN ──
+const saturnMainGroup = new THREE.Group();
+const satMainAngle=0.85, satMainDist=85, satMainElev=15*Math.PI/180;
+saturnMainGroup.position.set(Math.cos(satMainAngle)*Math.cos(satMainElev)*satMainDist, Math.sin(satMainElev)*satMainDist, Math.sin(satMainAngle)*Math.cos(satMainElev)*satMainDist);
+saturnMainGroup.scale.setScalar(0.023); saturnMainGroup.rotation.x=-0.3; saturnMainGroup.rotation.z=0.12;
+const satMGlowCvs = document.createElement('canvas'); satMGlowCvs.width=512; satMGlowCvs.height=512;
+const smgCtx = satMGlowCvs.getContext('2d');
+const smg1 = smgCtx.createRadialGradient(256,256,0,256,256,256);
+smg1.addColorStop(0,'rgba(240,200,140,0.3)'); smg1.addColorStop(0.05,'rgba(230,190,130,0.2)');
+smg1.addColorStop(0.15,'rgba(210,170,110,0.08)'); smg1.addColorStop(0.3,'rgba(190,150,100,0.02)');
+smg1.addColorStop(0.5,'rgba(170,130,80,0.0)'); smg1.addColorStop(1.0,'rgba(140,100,60,0.0)');
+smgCtx.fillStyle=smg1; smgCtx.fillRect(0,0,512,512);
+const satMGlowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(satMGlowCvs), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, fog:false }));
+satMGlowSprite.scale.setScalar(260); saturnMainGroup.add(satMGlowSprite); contentScene.add(saturnMainGroup);
+
+// ── GLB LOADER ──
+function b64ToUrl(id, mime) {
+  const b = document.getElementById(id).textContent.trim();
+  const d = atob(b); const u = new Uint8Array(d.length);
+  for (let i = 0; i < d.length; i++) u[i] = d.charCodeAt(i);
+  return URL.createObjectURL(new Blob([u], { type: mime }));
+}
+const loader = new GLTFLoader();
+const birdFlocks = [];
+let readyCount = 0;
+function checkReady() { if (++readyCount >= 4) { document.getElementById('loading').classList.add('done'); window.SABDA_READY = true; console.log('SABDA: All assets loaded, ready for rendering'); } }
+
+// ── BIRDS ──
+const birdsUrl = b64ToUrl('birdsdata', 'model/gltf-binary');
+loader.load(birdsUrl, gltf => {
+  URL.revokeObjectURL(birdsUrl);
+  const clip = gltf.animations[0];
+  const configs = [
+    {angle:0.0,dist:18,y:3.5,scale:2.5},{angle:1.05,dist:24,y:4.8,scale:2.0},
+    {angle:2.1,dist:30,y:3.8,scale:1.6},{angle:3.15,dist:20,y:5.5,scale:1.8},
+    {angle:4.2,dist:26,y:4.2,scale:2.2},{angle:5.25,dist:22,y:3.2,scale:1.7},
+  ];
+  for (let fi=0; fi<configs.length; fi++) {
+    const fc=configs[fi], ctr=new THREE.Group();
+    ctr.position.set(Math.cos(fc.angle)*fc.dist, fc.y, Math.sin(fc.angle)*fc.dist);
+    const clone = SkeletonUtils.clone(gltf.scene);
+    clone.scale.setScalar(fc.scale);
+    clone.traverse(c => { if(c.isMesh){c.frustumCulled=false; const isY=c.material?c.material.name==='Yellow':false;
+      c.material=new THREE.MeshStandardMaterial({color:isY?0xa08030:0x352010,roughness:0.5,metalness:0,side:THREE.DoubleSide,
+        emissive:isY?new THREE.Color(0x605020):new THREE.Color(0x201008),emissiveIntensity:0.15});}});
+    ctr.add(clone); contentScene.add(ctr);
+    const mixer=new THREE.AnimationMixer(clone), bts=0.4+fi*0.06;
+    const action=mixer.clipAction(clip); action.timeScale=bts; action.play();
+    birdFlocks.push({ctr,mixer,action,heading:fc.angle+Math.PI/2+(Math.random()-0.5)*0.3,
+      _initAngle:fc.angle,
+      cruiseSpeed:0.015+Math.random()*0.008,vy:0,homeY:fc.y,homeDist:fc.dist,
+      turnRate:0,desiredTurnRate:(Math.random()-0.5)*0.015,turnChangeTimer:10+Math.random()*15,
+      isGliding:false,glideTimer:3+Math.random()*4,glideDuration:1.5+Math.random()*2.0,
+      flapDuration:2.0+Math.random()*3.0,targetTimeScale:bts,currentTimeScale:bts,baseTimeScale:bts,
+      bankAngle:0,pitchAngle:0});
+  }
+  checkReady();
+});
+
+// ── PLANET GLB ──
+loader.load(b64ToUrl('planetdata','model/gltf-binary'), gltf => {
+  const model = gltf.scene;
+  model.traverse(c => { if(c.isMesh){c.frustumCulled=false; if(c.material){
+    const mn=(c.material.name||'').toLowerCase(), oMap=c.material.map, oNorm=c.material.normalMap;
+    if(mn.includes('cloud')){c.material=new THREE.MeshPhysicalMaterial({map:oMap,normalMap:oNorm,transparent:true,opacity:0.35,roughness:0.3,metalness:0,emissive:new THREE.Color(0xc0a0f0),emissiveIntensity:0.10,side:THREE.FrontSide,depthWrite:false});}
+    else{c.material=new THREE.MeshPhysicalMaterial({map:oMap,normalMap:oNorm,roughness:0.45,metalness:0.05,emissive:new THREE.Color(0x6633aa),emissiveIntensity:0.25,clearcoat:0.12,clearcoatRoughness:0.4});}
+  }}});
+  planetGroup.add(model);
+  if(gltf.animations&&gltf.animations.length>0){planetMixer=new THREE.AnimationMixer(model);const a=planetMixer.clipAction(gltf.animations[0]);a.timeScale=0.15;a.play();}
+  checkReady();
+});
+
+// ── SATURN GLB ──
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://unpkg.com/three@0.162.0/examples/jsm/libs/draco/');
+function applySaturnMaterials(root) {
+  root.traverse(c => { if(c.isMesh){c.frustumCulled=false; if(c.material){
+    const mn=(c.material.name||'').toLowerCase(), tex=c.material.map;
+    if(mn.includes('saturn1')){c.material=new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(0xe8d0a0)});}
+    else if(mn.includes('saturn2')){c.material=new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(0xddc899),side:THREE.DoubleSide,transparent:true,alphaTest:0.01});}
+    else{c.material=new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(0xccbbaa)});}
+    if(c.material.map){c.material.map.anisotropy=renderer.capabilities.getMaxAnisotropy();c.material.map.minFilter=THREE.LinearMipmapLinearFilter;}
+    c.material.needsUpdate=true;
+  }}});
+}
+const saturnLoader1 = new GLTFLoader(); saturnLoader1.setDRACOLoader(dracoLoader);
+const saturnUrl1 = b64ToUrl('saturndata','model/gltf-binary');
+saturnLoader1.load(saturnUrl1, gltf => {
+  URL.revokeObjectURL(saturnUrl1);
+  applySaturnMaterials(gltf.scene); saturnGroup.add(gltf.scene); checkReady();
+  const cloned = gltf.scene.clone(true);
+  cloned.traverse(c => { if(c.isMesh&&c.material){c.material=c.material.clone();if(c.material.map)c.material.map=c.material.map.clone();}});
+  applySaturnMaterials(cloned); saturnMainGroup.add(cloned); checkReady();
+});
+
+// ═══════════════════════════════════════════════════════
+// ANIMATION LOOP
+// ═══════════════════════════════════════════════════════
+const br = t => (Math.sin(t*Math.PI*2/BREATH - Math.PI/2)+1)/2;
+const colT = new THREE.Color(), colC = new THREE.Color(0.7,0.5,0.4);
+let time = 0, lastT = performance.now()/1000;
+let fpsFrames = 0, fpsLast = performance.now();
+const fpsEl = document.getElementById('fps');
+
+
+
+// ═══ PUPPETEER INTERFACE ═══
+// Expose render targets and renderer for pixel extraction
+window.SABDA_RENDERER = renderer;
+window.SABDA_WALLS = {
+  left: rtLeft,
+  right: rtRight,
+  front: rtFront,
+  back: rtBack,
+};
+
+// Manual frame render function (replaces requestAnimationFrame loop)
+window.SABDA_RENDER_FRAME = function(simTime) {
+  const dt = 1/30; // fixed timestep
+  time = simTime;
+  
+  // ── SKY DRIFT ──
+  skySphere.rotation.y = (time/1800)*Math.PI*2;
+
+  // ── DUST ──
+  dustMat.uniforms.uTime.value = time;
+  const dPos = dustGeo.attributes.position.array;
+  for(let i=0;i<DUST_COUNT;i++){const i3=i*3;
+    dPos[i3]+=dustSpeeds[i3]+Math.sin(time*0.3+dustPhases[i])*0.0005;
+    dPos[i3+1]+=dustSpeeds[i3+1]+Math.sin(time*0.2+dustPhases[i]*1.7)*0.0003;
+    dPos[i3+2]+=dustSpeeds[i3+2]+Math.cos(time*0.25+dustPhases[i]*0.8)*0.0005;
+    const dx=dPos[i3],dy=dPos[i3+1],dz=dPos[i3+2];
+    if(dx*dx+dy*dy+dz*dz>35*35||dy>20){const t2=Math.random()*Math.PI*2,p2=Math.acos(2*Math.random()-1),r2=3+Math.random()*10;
+      dPos[i3]=Math.sin(p2)*Math.cos(t2)*r2;dPos[i3+1]=Math.sin(p2)*Math.sin(t2)*r2-2;dPos[i3+2]=Math.cos(p2)*r2;}
+  }
+  dustGeo.attributes.position.needsUpdate = true;
+  // Fix 4: Dust homing near loop boundary
+  const dustLoopT = time % 1800;
+  const dustResetBlend = dustLoopT < 20 ? 1 - dustLoopT / 20 : dustLoopT > 1780 ? (dustLoopT - 1780) / 20 : 0;
+  if (dustResetBlend > 0) {
+    for (let i = 0; i < DUST_COUNT; i++) {
+      const i3 = i * 3;
+      const seed = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+      const homeX = (Math.abs(seed % 1) - 0.5) * 60;
+      const homeY2 = (Math.abs(Math.sin(seed * 2.3) % 1)) * 20;
+      const homeZ = (Math.abs(Math.sin(seed * 3.7) % 1) - 0.5) * 60;
+      dPos[i3] += (homeX - dPos[i3]) * dustResetBlend * 0.03;
+      dPos[i3+1] += (homeY2 - dPos[i3+1]) * dustResetBlend * 0.03;
+      dPos[i3+2] += (homeZ - dPos[i3+2]) * dustResetBlend * 0.03;
+    }
+    dustGeo.attributes.position.needsUpdate = true;
+  }
+
+  // ── BREATHING + COLOUR ──
+  const b = br(time), hue = (time/CCYCLE)%1;
+  colT.setHSL(hue,0.45,0.45); colC.lerp(colT,0.004);
+  // Fix 5: Colour lerp reset near loop boundary (v11 — exponential convergence)
+  const colLoopT = time % 1800;
+  if (colLoopT > 1790) {
+    const colBlend = (colLoopT - 1790) / 10; // 0→1 over last 10 seconds
+    const colEased = colBlend * colBlend * colBlend; // cubic
+    colC.lerp(new THREE.Color(0.7, 0.5, 0.4), colEased * 0.15);
+  }
+  const tR=0.5+colC.r*0.5,tG=0.5+colC.g*0.5,tB=0.5+colC.b*0.5;
+  ambient.color.setRGB(0.42*tR,0.33*tG,0.25*tB);
+  hemi.color.setRGB(0.77*tR,0.50*tG,0.25*tB);
+  hemi.groundColor.setRGB(0.10*tB,0.15*tG,0.12*tR);
+  rim.color.setRGB(0.25*tB,0.31*tG,0.50*tR);
+  renderer.toneMappingExposure = 0.9+b*0.12;
+  hemi.intensity = 0.35+b*0.06;
+
+  // ── SKY WARMTH ──
+  const skyPhase = (time/1800)*Math.PI*2;
+  const warmth = (Math.sin(skyPhase)+1)/2;
+  skySphereMat.color.setRGB(0.85+warmth*0.15, 0.82+warmth*0.10, 0.88+(1-warmth)*0.12);
+  sun.intensity = 0.5+warmth*0.4+b*0.1;
+  sun.color.setRGB(tR*(0.8+warmth*0.2), 0.56*tG*(0.6+warmth*0.4), 0.31*tB*(0.7+warmth*0.3));
+  ambient.intensity = 0.30+warmth*0.10+b*0.06;
+  contentScene.fog.color.setRGB(0.55+warmth*0.10, 0.43+warmth*0.05, 0.52+(1-warmth)*0.08);
+  dustMat.uniforms.uColor.value.setRGB(0.9+warmth*0.1, 0.75+warmth*0.13, 0.50+(1-warmth)*0.20);
+
+  // ── STARS ──
+  starMat.uniforms.uTime.value = time;
+  starMat.uniforms.uOpacity.value = Math.pow(1-warmth,1.5)*0.40;
+
+  // ── GOD RAYS ──
+  const rayOp = warmth*0.3+0.05;
+  for(const rm of rayMeshes){rm.material.opacity=rayOp;rm.rotation.z=Math.sin(time*0.05+rm.position.x*0.01)*0.03;}
+  rayGroup.rotation.y = skySphere.rotation.y;
+
+  // ── SHOOTING STAR (Fix 2: suppressed near loop boundary) ──
+  const ss = shootingStarState;
+  if (!ss.active) {
+    ss.timer -= dt;
+    const loopT = time % 1800;
+    if (ss.timer <= 0 && loopT > 2 && loopT < 1785) {
+      ss.active = true;
+      ss.maxLife = 0.7 + Math.random() * 0.4;
+      ss.life = ss.maxLife;
+      const sTheta = Math.random() * Math.PI * 2;
+      const sElev = (25 + Math.random() * 35) * Math.PI / 180;
+      const sR = 340;
+      ss.pos.set(Math.cos(sElev)*Math.cos(sTheta)*sR, Math.sin(sElev)*sR, Math.cos(sElev)*Math.sin(sTheta)*sR);
+      const speed = 180 + Math.random() * 100;
+      const vTheta = sTheta + (Math.random() > 0.5 ? 1 : -1) * (0.7 + Math.random() * 0.8);
+      const downFrac = 0.08 + Math.random() * 0.12;
+      ss.vel.set(Math.cos(vTheta)*speed, -speed*downFrac, Math.sin(vTheta)*speed);
+      ssHead.visible = true; ssTail.visible = true;
+    }
+  }
+  if (ss.active) {
+    ss.life -= dt;
+    const progress = 1 - ss.life / ss.maxLife;
+    const opacity = progress < 0.06 ? progress / 0.06 : Math.pow(Math.max(0, 1 - progress), 1.6);
+    ss.pos.addScaledVector(ss.vel, dt);
+    ssHead.position.copy(ss.pos); ssHead.scale.setScalar(opacity);
+    const tailLen = Math.min(progress * ss.maxLife, 0.3) * ss.vel.length() * opacity;
+    if (tailLen > 0.1) {
+      const velNorm = ss.vel.clone().normalize();
+      ssTail.position.copy(ss.pos).sub(velNorm.multiplyScalar(tailLen * 0.5));
+      ssTail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), ss.vel.clone().normalize());
+      ssTail.scale.set(opacity, tailLen, opacity);
+    }
+    ssTailMat.opacity = opacity * 0.6;
+    ssHeadMat.color.setRGB(1, 0.97 - progress * 0.1, 0.88 - progress * 0.2);
+    if (ss.life <= 0) { ss.active = false; ssHead.visible = false; ssTail.visible = false; ss.timer = 12; }
+  }
+
+  // ── PLANETS ──
+  planetGroup.rotation.y = (time / 1800) * Math.PI * 2 * 2; saturnGroup.rotation.y = (time / 1800) * Math.PI * 2 * 1; saturnMainGroup.rotation.y = (time / 1800) * Math.PI * 2 * 1;
+  if(planetMixer)planetMixer.setTime((time % 1800) * 0.15);
+  if(glowMat)glowMat.opacity=0.50+b*0.15;
+
+  // ── BIRDS ──
+  for(const bd of birdFlocks){
+    bd.glideTimer-=dt;
+    if(bd.glideTimer<=0){bd.isGliding=!bd.isGliding;bd.glideTimer=bd.isGliding?bd.glideDuration+Math.random()*0.5:bd.flapDuration+Math.random()*2;
+      bd.targetTimeScale=bd.isGliding?0.35:bd.baseTimeScale+Math.random()*0.15;}
+    bd.currentTimeScale+=(bd.targetTimeScale-bd.currentTimeScale)*1.5*dt;bd.action.timeScale=bd.currentTimeScale;bd.mixer.update(dt);
+    bd.turnChangeTimer-=dt;
+    if(bd.turnChangeTimer<=0){bd.desiredTurnRate=(Math.random()-0.5)*0.025;if(Math.random()<0.25)bd.desiredTurnRate*=0.15;bd.turnChangeTimer=6+Math.random()*9;}
+    const px=bd.ctr.position.x,pz=bd.ctr.position.z,dist=Math.sqrt(px*px+pz*pz);
+    let btb=0;
+    if(dist>bd.homeDist+5){const tc=Math.atan2(-pz,-px);let hd=tc-bd.heading;while(hd>Math.PI)hd-=Math.PI*2;while(hd<-Math.PI)hd+=Math.PI*2;btb=hd*0.008*(1+Math.min(1,(dist-bd.homeDist-5)*0.05)*3);}
+    if(dist<10){const aa=Math.atan2(pz,px);let ad=aa-bd.heading;while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;btb=ad*0.01;}
+    bd.turnRate+=(bd.desiredTurnRate+btb-bd.turnRate)*0.4*dt;bd.turnRate=Math.max(-0.03,Math.min(0.03,bd.turnRate));
+    bd.heading+=bd.turnRate*dt;bd.ctr.position.x+=Math.sin(bd.heading)*bd.cruiseSpeed;bd.ctr.position.z+=Math.cos(bd.heading)*bd.cruiseSpeed;
+    // Fix 3: Bird homing near loop boundary (v11 — exponential curve)
+    // Gentle for first ~25s, accelerates smoothly in last ~5s, guarantees exact match at boundary.
+    const birdLoopT = time % 1800;
+    const birdResetBlend = birdLoopT < 30 ? 1 - birdLoopT / 30 : birdLoopT > 1770 ? (birdLoopT - 1770) / 30 : 0;
+    if (birdResetBlend > 0) {
+      const eased = birdResetBlend * birdResetBlend * birdResetBlend; // cubic easing — nearly zero until last ~5s
+      const cx = bd.ctr.position.x, cz = bd.ctr.position.z;
+      const curDist = Math.sqrt(cx * cx + cz * cz);
+      // Target spawn position
+      const spawnX = Math.cos(bd._initAngle) * bd.homeDist;
+      const spawnZ = Math.sin(bd._initAngle) * bd.homeDist;
+      const spawnHeading = bd._initAngle + Math.PI / 2;
+      // Blend position toward spawn (cubic eased)
+      bd.ctr.position.x += (spawnX - cx) * eased * 0.08;
+      bd.ctr.position.z += (spawnZ - cz) * eased * 0.08;
+      bd.ctr.position.y += (bd.homeY - bd.ctr.position.y) * eased * 0.08;
+      // Blend heading toward spawn heading
+      let headDiff = spawnHeading - bd.heading;
+      while (headDiff > Math.PI) headDiff -= Math.PI * 2;
+      while (headDiff < -Math.PI) headDiff += Math.PI * 2;
+      bd.heading += headDiff * eased * 0.08;
+      // Kill vertical velocity near boundary
+      bd.vy *= (1 - eased);
+    }
+    const alt=bd.homeY+(bd.isGliding?-0.6:0.4);bd.vy+=(alt-bd.ctr.position.y)*0.03*dt;bd.vy*=0.96;bd.ctr.position.y+=bd.vy;
+    if(bd.ctr.position.y<2.5){bd.ctr.position.y=2.5;bd.vy=Math.max(bd.vy,0);}
+    if(bd.ctr.position.y>7.0){bd.ctr.position.y=7.0;bd.vy=Math.min(bd.vy,0);}
+    if(dist>45){const a=Math.atan2(pz,px)+Math.PI;bd.ctr.position.x=Math.cos(a)*bd.homeDist;bd.ctr.position.z=Math.sin(a)*bd.homeDist;bd.heading=a;}
+    bd.bankAngle+=(-bd.turnRate*5-bd.bankAngle)*1.5*dt;bd.ctr.rotation.z=bd.bankAngle;
+    bd.pitchAngle+=(-bd.vy*2.5-bd.pitchAngle)*1.5*dt;bd.ctr.rotation.x=bd.pitchAngle;bd.ctr.rotation.y=bd.heading+Math.PI;
+  }
+
+  // ── RENDER 4 WALLS ──
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.setRenderTarget(null);
+  cubeCamera.update(renderer, contentScene);
+
+  renderer.toneMapping = THREE.NoToneMapping;
+  const cubeTex = cubeRT.texture;
+  matFront.uniforms.tCube.value = cubeTex;
+  matRight.uniforms.tCube.value = cubeTex;
+  matBack.uniforms.tCube.value = cubeTex;
+  matLeft.uniforms.tCube.value = cubeTex;
+
+  renderer.setRenderTarget(rtFront); renderer.render(eqScnFront, eqCam);
+  renderer.setRenderTarget(rtRight); renderer.render(eqScnRight, eqCam);
+  renderer.setRenderTarget(rtBack);  renderer.render(eqScnBack, eqCam);
+  renderer.setRenderTarget(rtLeft);  renderer.render(eqScnLeft, eqCam);
+
+  renderer.setRenderTarget(null);
+};
+
+// Signal ready
+
+
+</script>
+</body>
+</html>
