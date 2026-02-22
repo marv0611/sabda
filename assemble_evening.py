@@ -10,7 +10,7 @@ with open(slim, 'r') as f:
     html = f.read()
 
 for aid in ['skydata', 'birdsdata', 'planetdata', 'saturndata']:
-    b64_path = os.path.join(assets_dir, f'{aid}.b64')
+    b64_path = os.path.join('assets_shared' if aid == 'saturndata' else assets_dir, f'{aid}.b64')
     with open(b64_path, 'r') as f:
         b64 = f.read().strip()
     placeholder = f'<script id="{aid}" type="text/plain">ASSET_PLACEHOLDER</script>'

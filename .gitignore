@@ -1,4 +1,5 @@
-.sabda_token
-output/
 .DS_Store
+*_full.html
+render_html_chunk_*
+package*.json
 node_modules/
