@@ -402,7 +402,7 @@ contentScene.add(rayGroup);
 
 // ── SHOOTING STAR ──
 const shootingStarState = {
-  active: false, timer: 8,
+  active: false, timer: 8, initSpeed: 0,
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, maxLife: 0,
 };
 const ssHeadMat = new THREE.MeshBasicMaterial({ color: 0xfff8e0, fog: false, toneMapped: false });
@@ -680,42 +680,74 @@ window.SABDA_RENDER_FRAME = function(simTime) {
   for(const rm of rayMeshes){rm.material.opacity=rayOp;rm.rotation.z=Math.sin(time*0.05+rm.position.x*0.01)*0.03;}
   rayGroup.rotation.y = skySphere.rotation.y;
 
-  // ── SHOOTING STAR (Fix 2: suppressed near loop boundary) ──
+  // ── SHOOTING STAR (v11.1 — realistic meteor physics) ──
   const ss = shootingStarState;
   if (!ss.active) {
     ss.timer -= dt;
     const loopT = time % 1800;
     if (ss.timer <= 0 && loopT > 2 && loopT < 1785) {
       ss.active = true;
-      ss.maxLife = 1.2 + Math.random() * 0.6;
+      ss.maxLife = 1.4 + Math.random() * 0.8;  // 1.4–2.2s
       ss.life = ss.maxLife;
+      // Spawn in upper sky (40-70° elevation), random azimuth
       const sTheta = Math.random() * Math.PI * 2;
-      const sElev = (25 + Math.random() * 35) * Math.PI / 180;
+      const sElev = (40 + Math.random() * 30) * Math.PI / 180;
       const sR = 340;
       ss.pos.set(Math.cos(sElev)*Math.cos(sTheta)*sR, Math.sin(sElev)*sR, Math.cos(sElev)*Math.sin(sTheta)*sR);
-      const speed = 180 + Math.random() * 100;
-      const vTheta = sTheta + (Math.random() > 0.5 ? 1 : -1) * (0.7 + Math.random() * 0.8);
-      const downFrac = 0.08 + Math.random() * 0.12;
-      ss.vel.set(Math.cos(vTheta)*speed, -speed*downFrac, Math.sin(vTheta)*speed);
+      // Travel direction: shallow downward diagonal (15-30° below horizontal)
+      const entryAngle = (15 + Math.random() * 15) * Math.PI / 180;
+      const travelTheta = sTheta + (Math.random() > 0.5 ? 1 : -1) * (0.3 + Math.random() * 0.5);
+      ss.initSpeed = 200 + Math.random() * 120;
+      ss.vel.set(
+        Math.cos(travelTheta) * Math.cos(entryAngle) * ss.initSpeed,
+        -Math.sin(entryAngle) * ss.initSpeed,
+        Math.sin(travelTheta) * Math.cos(entryAngle) * ss.initSpeed
+      );
       ssHead.visible = true; ssTail.visible = true;
     }
   }
   if (ss.active) {
     ss.life -= dt;
-    const progress = 1 - ss.life / ss.maxLife;
-    const opacity = progress < 0.06 ? progress / 0.06 : Math.pow(Math.max(0, 1 - progress), 1.6);
-    ss.pos.addScaledVector(ss.vel, dt);
-    ssHead.position.copy(ss.pos); ssHead.scale.setScalar(opacity);
-    const tailLen = Math.min(progress * ss.maxLife, 0.3) * ss.vel.length() * opacity;
-    if (tailLen > 0.1) {
-      const velNorm = ss.vel.clone().normalize();
-      ssTail.position.copy(ss.pos).sub(velNorm.multiplyScalar(tailLen * 0.5));
-      ssTail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), ss.vel.clone().normalize());
-      ssTail.scale.set(opacity, tailLen, opacity);
+    const progress = 1 - ss.life / ss.maxLife;  // 0→1
+
+    // Deceleration: atmospheric drag slows meteor over time
+    const drag = 1 - progress * 0.6;  // speed drops to 40% by end
+    const currentVel = ss.vel.clone().multiplyScalar(drag);
+
+    // Gravity arc: subtle downward pull increases over life
+    const gravity = -15 * progress * progress;
+    ss.pos.addScaledVector(currentVel, dt);
+    ss.pos.y += gravity * dt;
+
+    // Brightness: slow fade in, peak at 20-40%, gradual fade out
+    let brightness;
+    if (progress < 0.15) {
+      brightness = progress / 0.15;  // fade in
+    } else if (progress < 0.4) {
+      brightness = 1.0;  // peak brightness
+    } else {
+      brightness = Math.pow((1 - progress) / 0.6, 1.3);  // gradual fade
     }
-    ssTailMat.opacity = opacity * 0.6;
-    ssHeadMat.color.setRGB(1, 0.97 - progress * 0.1, 0.88 - progress * 0.2);
-    if (ss.life <= 0) { ss.active = false; ssHead.visible = false; ssTail.visible = false; ss.timer = 8; }
+
+    // Head
+    ssHead.position.copy(ss.pos);
+    ssHead.scale.setScalar(brightness * 0.8 + 0.2);  // never fully disappears during peak
+
+    // Tail: grows longer as meteor heats up, then shrinks
+    const tailGrowth = progress < 0.3 ? progress / 0.3 : 1.0;  // tail grows over first 30%
+    const tailLen = tailGrowth * currentVel.length() * 0.4 * brightness;
+    if (tailLen > 0.1) {
+      const velNorm = currentVel.clone().normalize();
+      ssTail.position.copy(ss.pos).sub(velNorm.multiplyScalar(tailLen * 0.5));
+      ssTail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), velNorm);
+      ssTail.scale.set(brightness * 0.7, tailLen, brightness * 0.7);
+    }
+    ssTailMat.opacity = brightness * 0.5;
+
+    // Color: white-hot → warm yellow → orange as it cools
+    ssHeadMat.color.setRGB(1, 1 - progress * 0.15, 0.9 - progress * 0.3);
+
+    if (ss.life <= 0) { ss.active = false; ssHead.visible = false; ssTail.visible = false; ss.timer = 6 + Math.random() * 8; }
   }
 
   // ── PLANETS ──
