@@ -101,10 +101,11 @@ async function main() {
   });
 
   console.log('Loading scene...');
-  await page.goto(`file://${HTML_FILE}`, { waitUntil: 'networkidle0', timeout: 120000 });
+  await page.goto(`file://${HTML_FILE}`, { waitUntil: 'domcontentloaded', timeout: 120000 });
 
-  // Wait for scene to be ready
-  await page.waitForFunction(() => window.SABDA_RENDER_FRAME && window.SABDA_RENDERER && window.SABDA_WALLS, { timeout: 60000 });
+  // Wait for all assets (sky textures, birds, planets, saturn) to load
+  console.log('Waiting for assets...');
+  await page.waitForFunction(() => window.SABDA_READY === true, { timeout: 180000 });
   console.log('Scene ready.\n');
 
   // ── RENDER LOOP ──
