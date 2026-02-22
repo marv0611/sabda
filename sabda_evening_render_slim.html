@@ -547,9 +547,9 @@ loader.load(birdsUrl, gltf => {
   URL.revokeObjectURL(birdsUrl);
   const clip = gltf.animations[0];
   const configs = [
-    {angle:0.0,dist:18,y:3.5,scale:2.5},{angle:1.05,dist:24,y:4.8,scale:2.0},
-    {angle:2.1,dist:30,y:3.8,scale:1.6},{angle:3.15,dist:20,y:5.5,scale:1.8},
-    {angle:4.2,dist:26,y:4.2,scale:2.2},{angle:5.25,dist:22,y:3.2,scale:1.7},
+    {angle:0.3,dist:18,y:3.5,scale:2.5},{angle:1.4,dist:24,y:4.8,scale:2.0},
+    {angle:2.5,dist:30,y:3.8,scale:1.6},{angle:3.7,dist:20,y:5.5,scale:1.8},
+    {angle:4.6,dist:26,y:4.2,scale:2.2},{angle:5.8,dist:22,y:3.2,scale:1.7},
   ];
   for (let fi=0; fi<configs.length; fi++) {
     const fc=configs[fi], ctr=new THREE.Group();
@@ -720,8 +720,8 @@ window.SABDA_RENDER_FRAME = function(simTime) {
       const sR = 340;
       ss.pos.set(Math.cos(sElev)*Math.cos(sTheta)*sR, Math.sin(sElev)*sR, Math.cos(sElev)*Math.sin(sTheta)*sR);
       ss.prevPos.copy(ss.pos);
-      // Steep downward diagonal: 60-80° from horizontal
-      const entryAngle = (60 + Math.random() * 20) * Math.PI / 180;
+      // Shallow diagonal entry: 20-45° from horizontal (like real meteors)
+      const entryAngle = (20 + Math.random() * 25) * Math.PI / 180;
       const travelTheta = sTheta + (Math.random() - 0.5) * 0.6;
       const speed = 250 + Math.random() * 150;
       ss.vel.set(
