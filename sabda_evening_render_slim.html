@@ -793,11 +793,37 @@ window.SABDA_RENDER_FRAME = function(simTime) {
 
 // ── LIVE PREVIEW (browser only, skipped by Puppeteer) ──
 if (!window.__SABDA_PUPPETEER__) {
-  let liveT = 0;
+  // Scrub UI
+  const scrubDiv = document.createElement('div');
+  scrubDiv.style.cssText = 'position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.7);padding:8px 16px;border-radius:8px;font-family:monospace;color:#c4a882;font-size:12px;';
+  const slider = document.createElement('input');
+  slider.type = 'range'; slider.min = 0; slider.max = 1800; slider.step = 1; slider.value = 0;
+  slider.style.cssText = 'width:400px;cursor:pointer;';
+  const info = document.createElement('span');
+  info.style.cssText = 'min-width:280px;white-space:nowrap;';
+  const playBtn = document.createElement('button');
+  playBtn.textContent = '⏸'; playBtn.style.cssText = 'background:none;border:1px solid #c4a882;color:#c4a882;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:14px;';
+  scrubDiv.appendChild(playBtn);
+  scrubDiv.appendChild(slider);
+  scrubDiv.appendChild(info);
+  document.body.appendChild(scrubDiv);
+
+  let liveT = 0, playing = true, scrubbing = false;
+  playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? '⏸' : '▶'; };
+  slider.oninput = () => { scrubbing = true; liveT = parseFloat(slider.value); };
+  slider.onchange = () => { scrubbing = false; };
+
   function liveLoop() {
-    liveT += 1/30;
+    if (playing && !scrubbing) liveT += 1/30;
+    if (liveT > 1800) liveT = 0;
+    if (!scrubbing) slider.value = liveT;
+
+    const mins = Math.floor(liveT/60), secs = Math.floor(liveT%60);
+    const warmth = (Math.sin((liveT/1800)*Math.PI*2)+1)/2;
+    const mix = 1.0 - warmth;
+    info.textContent = `${mins}:${secs.toString().padStart(2,'0')} / 30:00  warmth=${warmth.toFixed(2)}  mix=${mix.toFixed(2)} (${mix<0.1?'Evening':mix>0.9?'Belfast':'blend'})`;
+
     window.SABDA_RENDER_FRAME(liveT);
-    // Blit 4 walls to screen
     renderer.setRenderTarget(null);
     renderer.render(compScene, compCam);
     requestAnimationFrame(liveLoop);
