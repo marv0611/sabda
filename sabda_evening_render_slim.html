@@ -821,14 +821,14 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     if (birdLoopT > fadeOutStart) {
       birdFade = Math.max(0, 1 - (birdLoopT - fadeOutStart) / fadeDur);
     } else if (birdLoopT < fadeInStart + fadeDur) {
-      if (birdLoopT < 0.1 + bd._fadeOffset * 1.5 && birdLoopT >= bd._fadeOffset * 1.5) {
-        // Start bird far away so it glides in from distance
+      birdFade = birdLoopT < fadeInStart ? 0 : Math.min(1, (birdLoopT - fadeInStart) / fadeDur);
+      // While fully invisible, keep resetting position to spawn point
+      if (birdFade < 0.01) {
         const farDist = bd.homeDist + 25;
         bd.ctr.position.set(Math.cos(bd._initAngle)*farDist, bd.homeY, Math.sin(bd._initAngle)*farDist);
         bd.heading = bd._initAngle + Math.PI / 2;
         bd.vy = 0; bd.turnRate = 0;
       }
-      birdFade = birdLoopT < fadeInStart ? 0 : Math.min(1, (birdLoopT - fadeInStart) / fadeDur);
       // Ease-in curve so growth is barely noticeable at start
       birdFade = birdFade * birdFade * (3 - 2 * birdFade);  // smoothstep
     }
