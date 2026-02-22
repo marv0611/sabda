@@ -741,29 +741,30 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     const birdLoopT = time % 1800;
     const exitY = 55;  // well above visible frame
     if (birdLoopT > 1790) {
-      // Last 10s: steer upward and out of frame
-      const exitProgress = (birdLoopT - 1790) / 10;  // 0→1
-      const targetY = bd.homeY + (exitY - bd.homeY) * exitProgress * exitProgress;
-      bd.ctr.position.y += (targetY - bd.ctr.position.y) * 0.08;
-      bd.vy = 0;
+      // Last 10s: gently climb while still flying forward
+      const exitProgress = (birdLoopT - 1790) / 10;
+      const liftForce = exitProgress * exitProgress * 0.15;  // gentle increasing lift
+      bd.ctr.position.y += liftForce;
     } else if (birdLoopT < 10) {
-      // First 10s: descend from above into scene
+      // First 10s: glide down from above while flying forward
       if (birdLoopT < 0.1) {
-        // Reset to spawn position but high up
         bd.ctr.position.set(Math.cos(bd._initAngle)*bd.homeDist, exitY, Math.sin(bd._initAngle)*bd.homeDist);
         bd.heading = bd._initAngle + Math.PI / 2;
         bd.vy = 0; bd.turnRate = 0;
       }
-      const enterProgress = birdLoopT / 10;  // 0→1
-      const targetY = exitY + (bd.homeY - exitY) * enterProgress * enterProgress;
-      bd.ctr.position.y += (targetY - bd.ctr.position.y) * 0.08;
-      bd.vy = 0;
+      const enterProgress = birdLoopT / 10;
+      const sinkTarget = exitY + (bd.homeY - exitY) * enterProgress * enterProgress;
+      bd.vy += (sinkTarget - bd.ctr.position.y) * 0.01;  // gentle pull toward target altitude
     }
     bd.ctr.scale.setScalar(1);
     bd.ctr.visible = true;
-    const alt=bd.homeY+(bd.isGliding?-0.6:0.4);bd.vy+=(alt-bd.ctr.position.y)*0.03*dt;bd.vy*=0.96;bd.ctr.position.y+=bd.vy;
+    const alt=bd.homeY+(bd.isGliding?-0.6:0.4);
+    if (birdLoopT >= 10 && birdLoopT <= 1790) {
+      bd.vy+=(alt-bd.ctr.position.y)*0.03*dt;
+    }
+    bd.vy*=0.96;bd.ctr.position.y+=bd.vy;
     if(bd.ctr.position.y<2.5){bd.ctr.position.y=2.5;bd.vy=Math.max(bd.vy,0);}
-    if(bd.ctr.position.y>70){bd.ctr.position.y=70;bd.vy=0;}  // allow high flight during exit/enter
+    if(bd.ctr.position.y>70){bd.ctr.position.y=70;bd.vy=0;}
     if(dist>45){const a=Math.atan2(pz,px)+Math.PI;bd.ctr.position.x=Math.cos(a)*bd.homeDist;bd.ctr.position.z=Math.sin(a)*bd.homeDist;bd.heading=a;}
     bd.bankAngle+=(-bd.turnRate*5-bd.bankAngle)*1.5*dt;bd.ctr.rotation.z=bd.bankAngle;
     bd.pitchAngle+=(-bd.vy*2.5-bd.pitchAngle)*1.5*dt;bd.ctr.rotation.x=bd.pitchAngle;bd.ctr.rotation.y=bd.heading;
