@@ -1376,7 +1376,7 @@ HAP Q uses GPU-accelerated decompression but produces much larger files (~10×).
 | **v9** | **Video rendering pipeline (Puppeteer + readPixels + FFmpeg), Watchout integration workflow, preview/full mode, MSAA/readPixels incompatibility discovery, CRF 14 quality standard, stage positioning (X=92, Y=40/1506), H.264 → HAP Q codec upgrade path** |
 | **v10** | **Video loop continuity fixes (6 modifications for seamless Watchout looping), GitHub-based file transfer workflow (eliminates context window exhaustion from HTML uploads)** |
 | **v11** | **Render-only HTML architecture (separate from interactive viewer), loop check renderer (render_loopcheck.js), bird homing fix (radial nudge replaces heading-steering), preview mode dt/time mismatch documentation, commit discipline rule** |
-| **v11.1** | **Dual-sky Belfast crossfade (single sphere + shader mix), bird loop fade-out/in (replaces homing), planet animation loop fix (integer cycle alignment), live browser preview with time scrub slider, render.js Puppeteer script (preview + full mode), WebGL Metal/ANGLE backend for Mac** |
+| **v11.1** | **Dual-sky Belfast crossfade (single sphere + shader mix), bird facing fix (removed +PI), staggered bird fade at loop boundary, streak-based shooting stars (shader quad), planet animation loop fix (integer cycle alignment), live browser preview with time scrub slider, render.js Puppeteer script, WebGL Metal/ANGLE backend for Mac** |
 
 ---
 
@@ -1465,6 +1465,18 @@ Building on all v7 lessons (1-30), v8 adds lessons 31-42, v9 adds lessons 43-49,
 67. **(v11.1) Puppeteer page load: use domcontentloaded, not networkidle0.** With base64-embedded assets (two 8K sky textures = 27MB), `networkidle0` hangs waiting for data URL "network" activity to settle. Use `waitUntil: 'domcontentloaded'` for page load, then `waitForFunction(() => window.SABDA_READY === true)` to confirm all assets have loaded via the `checkReady()` counter.
 
 68. **(v11.1) Assembly script must handle cross-scene assets.** When crossfading between two scenes' skies, the assembly script needs to pull assets from a different scene's asset folder. The Evening scene's `assemble_evening.py` injects `skydata_b` from `assets_belfast/skydata.b64`. Each new cross-scene asset needs: (a) a `<script id="...">ASSET_PLACEHOLDER</script>` tag in the slim HTML, (b) a corresponding entry in the assembly script with the correct source path.
+
+69. **(v11.1) Bird rotation: don't add Math.PI to heading.** The bird GLB model's default forward is -Z. Setting `rotation.y = heading` aligns the model with travel direction. Adding `+ Math.PI` flips it 180° — birds fly backward. This was a pre-existing bug discovered via screenshot inspection. Rule: always verify model facing direction before assuming a rotation offset is needed.
+
+70. **(v11.1) Fly-out-above for bird loop boundaries is a dead end.** Three approaches failed: (a) smoothstep position.y override — birds cluster and rocket upward together, (b) lift force — birds accelerate unnaturally, (c) vy pull toward target — birds drop vertically. Any direct position.y manipulation during boundary fights the natural flight and looks wrong. The working solution is staggered fade: each bird gets `_fadeOffset = index * 1.3s`, fades out individually over 4s, resets position at t=0, fades in individually. No position manipulation, birds fly naturally throughout.
+
+71. **(v11.1) Shooting stars must be shader quads, not sphere+cylinder.** Real meteors appear as thin bright streaks, not glowing balls. Replace SphereGeometry head + CylinderGeometry tail with a single PlaneGeometry + ShaderMaterial. Fragment shader: bright head at uv.y=1 fading to transparent tail at uv.y=0, thin center line via `pow(1 - abs(uv.x - 0.5) * 2, 3)`. Billboard toward camera with `lookAt(0,0,0)`, rotate to align with velocity.
+
+72. **(v11.1) Shooting star entry angle: 20-45° from horizontal.** Setting entry angle to 60-80° makes meteors fall nearly vertically — this never happens in reality. Real meteors enter the atmosphere at shallow angles (20-45° below horizontal), creating the characteristic diagonal streak. Always reference real footage before setting physics parameters.
+
+73. **(v11.1) Don't over-engineer natural phenomena — study reference first.** A "realistic meteor physics" rewrite with deceleration, gravity arcs, and brightness curves produced worse results than the simple straight-line approach with correct entry angle and a longer tail. The simple version looked more like the reference gif. Complexity ≠ realism. Match the visual reference, not the physics textbook.
+
+74. **(v11.1) Shooting star frequency for wellness: ~30s average.** Original 6-14s interval was too frequent for a meditative environment. Set to `timer = 25 + Math.random() * 10` for 25-35s gaps (avg 30s). Initial spawn timer 8s for testing convenience.
 
 ---
 
