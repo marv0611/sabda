@@ -9,6 +9,7 @@
  */
 
 const puppeteer = require('puppeteer');
+console.log('SABDA render.js starting...');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
