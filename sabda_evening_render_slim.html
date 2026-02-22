@@ -818,10 +818,29 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
       bd.ctr.position.z = Math.sin(a) * bd.homeDist;
       bd.heading = a + Math.PI/2 + (Math.random()-0.5)*0.5;
     }
-    // Bird fade — SIMPLIFIED: always visible, no loop boundary handling for now
-    bd.ctr.scale.setScalar(1);
-    bd.ctr.visible = true;
-    {
+    // Smooth loop boundary — fade out last 12s, fade in first 12s, staggered per bird
+    const birdLoopT = time % 1800;
+    const loopFadeDur = 10;
+    const stagger = bd._fadeOffset * 1.2;  // 0, 1.56, 3.12, 4.68, 6.24, 7.8
+    const fadeOutStart = 1800 - 12 + stagger;
+    const fadeInEnd = stagger + loopFadeDur;
+    let birdFade = 1;
+    if (birdLoopT > fadeOutStart) {
+      birdFade = Math.max(0, 1 - (birdLoopT - fadeOutStart) / loopFadeDur);
+    } else if (birdLoopT < fadeInEnd) {
+      birdFade = birdLoopT < stagger ? 0 : Math.min(1, (birdLoopT - stagger) / loopFadeDur);
+    }
+    // Smooth curve
+    birdFade = birdFade * birdFade * (3 - 2 * birdFade);
+    // Reset position while invisible
+    if (birdFade < 0.01) {
+      bd.ctr.position.set(Math.cos(bd._initAngle)*bd.homeDist, bd.homeY, Math.sin(bd._initAngle)*bd.homeDist);
+      bd.heading = bd._initAngle + Math.PI / 2;
+      bd.vy = 0; bd.turnRate = 0; bd.bankAngle = 0; bd.pitchAngle = 0;
+    }
+    bd.ctr.scale.setScalar(0.3 + birdFade * 0.7);
+    bd.ctr.visible = birdFade > 0.01;
+    if (birdFade > 0.01) {
     const alt=bd.homeY+(bd.isGliding?-0.3:0.2);bd.vy+=(alt-bd.ctr.position.y)*0.02*dt;bd.vy*=Math.pow(0.96, dt*30);bd.ctr.position.y+=bd.vy;
     // Soft altitude limits — push back gently instead of hard clamp
     if(bd.ctr.position.y<2.8){bd.vy+=(2.8-bd.ctr.position.y)*0.05*dt;}
