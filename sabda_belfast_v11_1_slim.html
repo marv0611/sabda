@@ -275,32 +275,48 @@ for (let i = 0; i < RAY_COUNT; i++) {
 }
 contentScene.add(rayGroup);
 
-// ── SHOOTING STAR SYSTEM ──
+// ── SHOOTING STAR ──
 const shootingStarState = {
-  active: false,
-  timer: 8,
-  pos: new THREE.Vector3(),
-  vel: new THREE.Vector3(),
-  life: 0, maxLife: 0,
+  active: false, timer: 1,
+  pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, maxLife: 0,
 };
-
-// Head: bright glowing sphere
-const ssHeadGeo = new THREE.SphereGeometry(1.5, 8, 8);
-const ssHeadMat = new THREE.MeshBasicMaterial({ 
-  color: 0xfff8e0, fog: false, toneMapped: false 
+// Shooting star = 2-triangle quad, vertices updated each frame in world space
+const ssGeo = new THREE.BufferGeometry();
+const ssVerts = new Float32Array(6 * 3);
+const ssUvs = new Float32Array(6 * 2);
+ssUvs.set([0,1, 1,1, 0,0, 1,1, 1,0, 0,0]);
+ssGeo.setAttribute('position', new THREE.BufferAttribute(ssVerts, 3));
+ssGeo.setAttribute('uv', new THREE.BufferAttribute(ssUvs, 2));
+const ssMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+  uniforms: {
+    uOpacity: { value: 1.0 },
+    uColor: { value: new THREE.Color(1, 0.98, 0.9) },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform float uOpacity;
+    uniform vec3 uColor;
+    varying vec2 vUv;
+    void main() {
+      float headGlow = pow(vUv.y, 2.5);
+      float cx = abs(vUv.x - 0.5) * 2.0;
+      float core = pow(max(0.0, 1.0 - cx), 6.0);
+      float glow = pow(max(0.0, 1.0 - cx), 1.8) * 0.25;
+      float centerLine = core + glow;
+      float headBoost = smoothstep(0.88, 1.0, vUv.y) * 0.7;
+      float alpha = headGlow * centerLine * uOpacity + headBoost * uOpacity * core;
+      gl_FragColor = vec4(uColor, clamp(alpha, 0.0, 1.0));
+    }
+  `,
 });
-const ssHead = new THREE.Mesh(ssHeadGeo, ssHeadMat);
-ssHead.visible = false;
-contentScene.add(ssHead);
-
-// Tail: tapered cone
-const ssTailGeo = new THREE.CylinderGeometry(0.0, 1.2, 1.0, 8, 1);
-const ssTailMat = new THREE.MeshBasicMaterial({ 
-  color: 0xffe0a0, fog: false, transparent: true, opacity: 0.7, toneMapped: false
-});
-const ssTail = new THREE.Mesh(ssTailGeo, ssTailMat);
-ssTail.visible = false;
-contentScene.add(ssTail);
+const ssStreak = new THREE.Mesh(ssGeo, ssMat);
+ssStreak.visible = false; ssStreak.frustumCulled = false;
+contentScene.add(ssStreak);
 
 // ── FLOATING DUST / POLLEN PARTICLES ──
 const DUST_COUNT = 250;
@@ -918,56 +934,65 @@ function animate() {
   // Rotate god rays with sky
   rayGroup.rotation.y = skySphere.rotation.y;
 
-  // ── SHOOTING STAR ──
+  // ── SHOOTING STAR (shallow sweeping streak) ──
   const ss = shootingStarState;
   if (!ss.active) {
     ss.timer -= dt;
-    if (ss.timer <= 0) {
+    const loopT = time % 1800;
+    if (ss.timer <= 0 && loopT > 2 && loopT < 1785) {
       ss.active = true;
-      ss.maxLife = 0.7 + Math.random() * 0.4;  // 0.7-1.1s
+      ss.maxLife = 2.0 + Math.random() * 1.0;
       ss.life = ss.maxLife;
-      // Random position in upper sky
       const sTheta = Math.random() * Math.PI * 2;
-      const sElev = (25 + Math.random() * 35) * Math.PI / 180;
+      const sElev = (30 + Math.random() * 25) * Math.PI / 180;
       const sR = 340;
-      ss.pos.set(
-        Math.cos(sElev) * Math.cos(sTheta) * sR,
-        Math.sin(sElev) * sR,
-        Math.cos(sElev) * Math.sin(sTheta) * sR
+      ss.pos.set(Math.cos(sElev)*Math.cos(sTheta)*sR, Math.sin(sElev)*sR, Math.cos(sElev)*Math.sin(sTheta)*sR);
+      const entryAngle = (5 + Math.random() * 7) * Math.PI / 180;
+      const travelTheta = sTheta + 0.3 + Math.random() * 0.3;
+      const speed = 130 + Math.random() * 50;
+      ss.vel.set(
+        Math.cos(travelTheta) * Math.cos(entryAngle) * speed,
+        -Math.sin(entryAngle) * speed,
+        Math.sin(travelTheta) * Math.cos(entryAngle) * speed
       );
-      // Natural meteor: shallow arc
-      const speed = 180 + Math.random() * 100;
-      const vTheta = sTheta + (Math.random() > 0.5 ? 1 : -1) * (0.7 + Math.random() * 0.8);
-      const downFrac = 0.08 + Math.random() * 0.12;
-      ss.vel.set(Math.cos(vTheta) * speed, -speed * downFrac, Math.sin(vTheta) * speed);
-      ssHead.visible = true;
-      ssTail.visible = true;
+      ssStreak.visible = true;
     }
   }
   if (ss.active) {
     ss.life -= dt;
     const progress = 1 - ss.life / ss.maxLife;
-    const opacity = progress < 0.06 ? progress / 0.06 : Math.pow(Math.max(0, 1 - progress), 1.6);
+    let opacity;
+    if (progress < 0.05) opacity = progress / 0.05;
+    else if (progress < 0.6) opacity = 1.0;
+    else opacity = Math.pow((1 - progress) / 0.4, 0.7);
+    opacity = Math.max(0, opacity);
     ss.pos.addScaledVector(ss.vel, dt);
-    // Head
-    ssHead.position.copy(ss.pos);
-    ssHead.scale.setScalar(opacity);
-    // Tail: stretched cone behind head
-    const tailLen = Math.min(progress * ss.maxLife, 0.3) * ss.vel.length() * opacity;
-    if (tailLen > 0.1) {
-      const velNorm = ss.vel.clone().normalize();
-      ssTail.position.copy(ss.pos).sub(velNorm.multiplyScalar(tailLen * 0.5));
-      ssTail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), ss.vel.clone().normalize());
-      ssTail.scale.set(opacity, tailLen, opacity);
-    }
-    ssTailMat.opacity = opacity * 0.6;
-    ssHeadMat.color.setRGB(1, 0.97 - progress * 0.1, 0.88 - progress * 0.2);
-    if (ss.life <= 0) {
-      ss.active = false;
-      ssHead.visible = false;
-      ssTail.visible = false;
-      ss.timer = 12;
-    }
+    const velDir = ss.vel.clone().normalize();
+    const head = ss.pos.clone();
+    const tail = ss.pos.clone().sub(velDir.clone().multiplyScalar(220));
+    const camDir = head.clone().normalize();
+    const side = velDir.clone().cross(camDir);
+    if (side.lengthSq() < 0.001) side.set(0, 1, 0);
+    side.normalize();
+    const hw = 1.2;
+    const p = ssGeo.attributes.position.array;
+    const hL = head.clone().add(side.clone().multiplyScalar(hw));
+    const hR = head.clone().sub(side.clone().multiplyScalar(hw));
+    const tL = tail.clone().add(side.clone().multiplyScalar(hw));
+    const tR = tail.clone().sub(side.clone().multiplyScalar(hw));
+    p[0]=hL.x; p[1]=hL.y; p[2]=hL.z;
+    p[3]=hR.x; p[4]=hR.y; p[5]=hR.z;
+    p[6]=tL.x; p[7]=tL.y; p[8]=tL.z;
+    p[9]=hR.x;  p[10]=hR.y; p[11]=hR.z;
+    p[12]=tR.x; p[13]=tR.y; p[14]=tR.z;
+    p[15]=tL.x; p[16]=tL.y; p[17]=tL.z;
+    ssGeo.attributes.position.needsUpdate = true;
+    ssStreak.position.set(0, 0, 0);
+    ssStreak.rotation.set(0, 0, 0);
+    ssStreak.scale.set(1, 1, 1);
+    ssMat.uniforms.uOpacity.value = opacity;
+    ssMat.uniforms.uColor.value.setRGB(1, 0.97 - progress * 0.05, 0.92 - progress * 0.1);
+    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 25 + Math.random() * 10; }
   }
 
   // v3: Room glow lights breathe with content
