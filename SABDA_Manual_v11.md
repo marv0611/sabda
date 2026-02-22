@@ -1,4 +1,4 @@
-# SABDA Immersive Visual Production Manual v10
+# SABDA Immersive Visual Production Manual v11
 
 ## Purpose
 
@@ -6,7 +6,9 @@ Step-by-step process for creating immersive 3D visual scenes for the SABDA welln
 
 This manual is parameterised. The architecture is universal. Only the **scene content** changes (butterflies, forest, underwater, rain, etc.). The pipeline, HTML structure, animation system, and delivery format are always identical.
 
-This is v10. It incorporates all v8/v9 content plus: **video loop continuity fixes** (6 modifications ensuring seamless frame 0 to frame 1799 transitions for looped Watchout playback), and the **GitHub-based file transfer workflow** that eliminates context window exhaustion from large HTML uploads.
+This is v11. It incorporates all v8/v9/v10 content plus: **render-only HTML architecture** (separate from interactive viewer, 10-25× faster), **loop check renderer** (render_loopcheck.js for verifying loop continuity), **bird homing fix** (gentle radial nudge replaces aggressive heading-steering that caused circular orbits), **preview mode limitations** (dt/time mismatch documentation), and **commit discipline rule** (always commit working files immediately).
+
+Previous v10 additions (all retained): Video loop continuity fixes (6 modifications ensuring seamless frame 0 to frame 1799 transitions for looped Watchout playback), and the GitHub-based file transfer workflow that eliminates context window exhaustion from large HTML uploads.
 
 Previous v9 additions (all retained): Puppeteer video rendering pipeline, Watchout integration, MSAA/readPixels discovery, CRF 14 quality standard, preview/full mode.
 
@@ -1365,12 +1367,13 @@ HAP Q uses GPU-accelerated decompression but produces much larger files (~10×).
 | **Sim v4 (v8)** | **8K sky upgrade, PNG format, HalfFloat cubemap, shader dithering, adaptive shadow lift, texture noise for flat zones, warmth tint safe range, visual pre-delivery inspection protocol, dual-sky crossfade architecture** |
 | **v9** | **Video rendering pipeline (Puppeteer + readPixels + FFmpeg), Watchout integration workflow, preview/full mode, MSAA/readPixels incompatibility discovery, CRF 14 quality standard, stage positioning (X=92, Y=40/1506), H.264 → HAP Q codec upgrade path** |
 | **v10** | **Video loop continuity fixes (6 modifications for seamless Watchout looping), GitHub-based file transfer workflow (eliminates context window exhaustion from HTML uploads)** |
+| **v11** | **Render-only HTML architecture (separate from interactive viewer), loop check renderer (render_loopcheck.js), bird homing fix (radial nudge replaces heading-steering), preview mode dt/time mismatch documentation, commit discipline rule** |
 
 ---
 
-## 20. Lessons Learned Log (v8 + v9 + v10 Additions)
+## 20. Lessons Learned Log (v8 + v9 + v10 + v11 Additions)
 
-Building on all v7 lessons (1-30), v8 adds lessons 31-42, v9 adds lessons 43-49, v10 adds lessons 50-52.
+Building on all v7 lessons (1-30), v8 adds lessons 31-42, v9 adds lessons 43-49, v10 adds lessons 50-52, v11 adds lessons 53-59.
 
 31. **(v8) ALWAYS visually inspect before delivering.** Six consecutive builds were delivered and rejected because the agent trusted numbers without looking. The moment the agent used `view` to inspect the wall preview, the problem (flat featureless water patch) was immediately visible. Visual inspection would have caught this on build #1 and saved hours. This is now Absolute Rule #1.
 
@@ -1419,6 +1422,22 @@ Building on all v7 lessons (1-30), v8 adds lessons 31-42, v9 adds lessons 43-49,
 51. **(v10) Homing blends must be gentle and bidirectional.** Birds need 30 seconds of 5%-per-frame homing on BOTH sides of the loop boundary (last 30s + first 30s). If homing is only applied before the cut, the first 30s after the cut shows birds suddenly released from homing, creating a different kind of visible discontinuity. The blend factor ramps 0 to 1 approaching the boundary and 1 to 0 leaving it, creating a smooth position match.
 
 52. **(v10) Large HTML files (50MB+) must NEVER be uploaded as chat chunks.** Uploading 51MB of HTML chunks into a Claude chat alongside project files (1300+ lines of manual) immediately exhausts the context window, triggering compaction before the agent can even begin work. The solution is GitHub: store HTML files in a private repo (`github.com/marv0611/sabda`), clone via `git clone` at session start. This puts the file on disk without using any context. github.com is in the allowed network domains. raw.githubusercontent.com is blocked, so always use full `git clone`, not curl.
+
+### v11 Additions: Render Architecture, Loop Check, Bird Fix
+
+53. **(v11) Render-only HTML is a separate file from the interactive viewer.** The render pipeline uses a dedicated lean HTML (~740 lines) with `antialias: false`, `UnsignedByteType`, no bloom, no orbit controls, no room scene, no strip RT, no MSAA. It exposes `SABDA_RENDER_FRAME` with all scene update logic inline. Never try to bolt render hooks onto the interactive viewer HTML — it's 10-25× slower due to the strip RT, MSAA, bloom, and rAF loop overhead. These are two separate files serving different purposes: the interactive viewer (antialias, bloom, MSAA, orbit controls, room scene) is for browser preview; the render HTML (antialias false, UnsignedByteType, no bloom, no room, direct per-wall equirect) is for Puppeteer rendering. Any attempt to unify them with URL parameters or mode flags creates the exact 25× slowdown that was debugged for 3 hours.
+
+54. **(v11) Always commit working files to the repo immediately.** A 3-hour debugging session happened because the working render HTML was never committed. When a new chat started, only the interactive viewer HTML was in the repo, and the agent had to re-derive the render HTML from scratch — incorrectly. Rule: after any successful render run, immediately `git add -A && git commit -m "working render" && git push`. This is non-negotiable.
+
+55. **(v11) Preview mode cannot validate dt-dependent elements.** Preview (30× speed) advances scene time by `sceneTimePerFrame = 1.0` per frame, but `dt` stays hardcoded at `1/30`. Any physics or animation using `dt` (birds, dust, shooting stars) runs at 1/30th real speed relative to scene time. Preview only validates time-absolute elements: sky rotation, warmth cycle, planet positions, colour cycling. This is not a bug — it's a known limitation of the preview architecture. Do not waste time trying to "fix" bird movement in preview mode.
+
+56. **(v11) Loop check renderer verifies loop continuity.** Use `render_loopcheck.js` to verify loop continuity — it renders the last 15 seconds (t=1785→1800) followed by the first 15 seconds (t=0→15) at real-time speed. The loop point is at the 15-second mark of the output video. No warmup is needed because homing fixes bring birds/dust to spawn positions near boundaries regardless of accumulated state. Always run the loop check after modifying any animation that has state near the boundary.
+
+57. **(v11) Bird homing must nudge position, not steer heading.** The original homing implementation (v10 Fix 3) steered bird heading toward a rotating `homeAngle` at 5% per frame. This overpowered the birds' natural flight drift and caused them to orbit their spawn position in tight circles — especially visible in the loopcheck where 100% of the rendered time is homing zone. The fix replaces heading-steering with gentle radial position nudging: `distErr * birdResetBlend * 0.003` moves the bird toward `homeDist` from centre, and a matching height nudge moves it toward `homeY`. The existing boundary steering (line 691, `dist > homeDist + 5`) handles angular distribution naturally. Birds now fly with natural drift during homing instead of circling.
+
+58. **(v11) Loopcheck only shows homing time — behaviour looks worse than reality.** The loopcheck renders t=1770→1800 + t=0→30, which is 100% inside the homing zone. Any issues with homing (circular orbits, unnatural steering) are maximally visible in loopcheck output. In the actual 30-minute video, homing only runs for 60 seconds out of 1800 (3.3% of total time). If birds look slightly constrained in loopcheck but not visibly circular, that's acceptable.
+
+59. **(v11) Chrome launch args matter for render performance.** The Puppeteer renderer uses `--use-gl=angle` and `--enable-webgl` with `--ignore-gpu-blocklist` for GPU access. The viewport size is set to 6928×2400 (the composite output resolution). These args are critical — without `--use-gl=angle`, Chrome may fall back to software rendering, which is orders of magnitude slower.
 
 ---
 
@@ -1476,8 +1495,10 @@ The next Claude session clones and gets the latest version automatically.
 
 | File | Purpose |
 |------|---------|
-| `sabda_evening_render.html` | Current Evening Road scene (loop-fixed) |
-| `render.js` | Video rendering script (Puppeteer + FFmpeg) |
+| `sabda_evening_render.html` | Current Evening Road scene — render-only HTML (loop-fixed, bird homing fixed) |
+| `render.js` | Video rendering script — Puppeteer + FFmpeg (preview/full modes) |
+| `render_loopcheck.js` | Loop boundary checker — renders last 15s + first 15s at real-time speed |
+| `render_html_chunk_a*` | Split chunks of the render HTML (GitHub-friendly, `cat` to reconstruct) |
 | Future scene HTMLs | New scenes as they're built |
 
 ### What Does NOT Go in the Repo
@@ -1494,6 +1515,6 @@ The next Claude session clones and gets the latest version automatically.
 
 ---
 
-*Manual v10 â€” February 2026*
+*Manual v11 — February 2026*
 *Standard: 10/10 or nothing.*
 *Rule #1: Look before you deliver.*
