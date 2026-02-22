@@ -749,22 +749,34 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     else if (progress < 0.6) opacity = 1.0;
     else opacity = Math.pow((1 - progress) / 0.4, 0.7);
     opacity = Math.max(0, opacity);
-    // Move head forward
+    // Move head along the sky dome surface (angular velocity)
     ss.pos.addScaledVector(ss.vel, dt);
-    // Head and tail positions in world space
-    const velDir = ss.vel.clone().normalize();
+    // Re-project onto sky dome so meteor stays on the sphere surface
+    ss.pos.normalize().multiplyScalar(340);
+    // Head position
     const head = ss.pos.clone();
-    // Tail length scales with how much the meteor moves across your view (not toward you)
+    // Tail: trace back along the dome surface using velocity direction
+    // Angular tail length: tailLen in degrees mapped to radians on the sphere
+    const tailAngle = (0.6 + ss.tailBonus * 0.003) ;  // 0.6-2.4 radians (35°-137°) on the dome
+    const velDir = ss.vel.clone().normalize();
+    // Walk back along the dome from head in the opposite direction of velocity
+    const tailDir = velDir.clone().negate().normalize();
+    // Use Rodrigues rotation to place tail point on the sphere
+    const headNorm = head.clone().normalize();
+    const rotAxis = headNorm.clone().cross(tailDir).normalize();
+    if (rotAxis.lengthSq() < 0.001) rotAxis.set(0, 1, 0);
+    // Rotate head position around rotAxis by tailAngle
+    const cosA = Math.cos(tailAngle), sinA = Math.sin(tailAngle);
+    const tail = head.clone().multiplyScalar(cosA)
+      .add(rotAxis.clone().cross(head).multiplyScalar(sinA))
+      .add(rotAxis.clone().multiplyScalar(rotAxis.dot(head) * (1 - cosA)));
+    // Build camera-facing quad between head and tail
+    const streak = head.clone().sub(tail).normalize();
     const camDir = head.clone().normalize();
-    const velPerp = velDir.clone().sub(camDir.clone().multiplyScalar(velDir.dot(camDir)));
-    const perpSpeed = velPerp.length();
-    const tailLen = 700 + perpSpeed * 250 + ss.tailBonus;  // 700-1550 — huge sweeping streaks
-    const tail = head.clone().sub(velDir.clone().multiplyScalar(tailLen));
-    // Build camera-facing quad
-    const side = velDir.clone().cross(camDir);
-    if (side.lengthSq() < 0.001) side.set(0, 1, 0); // fallback if parallel
+    const side = streak.clone().cross(camDir);
+    if (side.lengthSq() < 0.001) side.set(0, 1, 0);
     side.normalize();
-    const hw = 1.2; // half-width — thin ethereal line
+    const hw = 1.5; // half-width — slightly wider for visibility on dome
     // 6 vertices: 2 triangles forming a quad from tail to head
     const p = ssGeo.attributes.position.array;
     // Triangle 1: headL, headR, tailL
