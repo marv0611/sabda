@@ -1132,19 +1132,27 @@ project_folder/
 ### Running the Pipeline
 
 ```bash
-# 1. Preview mode (always first)
-cd /path/to/project
-node render.js                    # MODE='preview' by default
+# 1. Assemble full HTML (injects base64 assets)
+cd ~/Documents/GitHub/sabda
+python3 assemble_evening.py
 
-# 2. Check output visually
-# Open output/sabda_top.mp4 and sabda_bottom.mp4
+# 2. Live browser preview (check crossfade, loop boundary)
+open sabda_evening_render_full.html
+# Use time scrub slider at bottom — drag to 22:30 for pure Belfast, 7:30 for pure Evening
+# Scrub to 29:52→0:08 to verify bird fade and planet loop
+
+# 3. Preview render (always first — 60s output, ~10 min)
+node render.js
+
+# 4. Check output visually
+open output/sabda_top.mp4
+open output/sabda_bottom.mp4
 # Verify: no black frames, correct colours, smooth animation, no artifacts
 
-# 3. Full production render
-# Edit render.js: const MODE = 'full';
-node render.js                    # ~3.3 hours
+# 5. Full production render (30min output, ~5 hours)
+node render.js full
 
-# 4. Load into Watchout (see Section 18)
+# 6. Load into Watchout (see Section 18)
 ```
 
 ---
@@ -1368,6 +1376,7 @@ HAP Q uses GPU-accelerated decompression but produces much larger files (~10×).
 | **v9** | **Video rendering pipeline (Puppeteer + readPixels + FFmpeg), Watchout integration workflow, preview/full mode, MSAA/readPixels incompatibility discovery, CRF 14 quality standard, stage positioning (X=92, Y=40/1506), H.264 → HAP Q codec upgrade path** |
 | **v10** | **Video loop continuity fixes (6 modifications for seamless Watchout looping), GitHub-based file transfer workflow (eliminates context window exhaustion from HTML uploads)** |
 | **v11** | **Render-only HTML architecture (separate from interactive viewer), loop check renderer (render_loopcheck.js), bird homing fix (radial nudge replaces heading-steering), preview mode dt/time mismatch documentation, commit discipline rule** |
+| **v11.1** | **Dual-sky Belfast crossfade (single sphere + shader mix), bird loop fade-out/in (replaces homing), planet animation loop fix (integer cycle alignment), live browser preview with time scrub slider, render.js Puppeteer script (preview + full mode), WebGL Metal/ANGLE backend for Mac** |
 
 ---
 
@@ -1440,6 +1449,22 @@ Building on all v7 lessons (1-30), v8 adds lessons 31-42, v9 adds lessons 43-49,
 59. **(v11) Chrome launch args matter for render performance.** The Puppeteer renderer uses `--use-gl=angle` and `--enable-webgl` with `--ignore-gpu-blocklist` for GPU access. The viewport size is set to 6928×2400 (the composite output resolution). These args are critical — without `--use-gl=angle`, Chrome may fall back to software rendering, which is orders of magnitude slower.
 
 60. **(v11) Context window management is a production constraint.** The Claude Project File loads into EVERY message. A bloated project file (4K+ tokens of tables) + pasted conversation transcripts + full manual reads = conversation dies after 3-4 messages. Fix: slim project file (~800 tokens), no transcript pasting (use Claude's past-chat search tools), targeted manual section reads only. See Section 23.
+
+61. **(v11.1) Dual-sky crossfade must use single sphere + ShaderMaterial.** Two sky spheres with transparency = 256MB VRAM + lag. A single sphere with a custom fragment shader mixing two textures via `mix(a.rgb, b.rgb, mixVal)` achieves the same result at negligible cost. The `mixVal` uniform is driven by `1.0 - warmth` so warm peak = sky A (Evening), cool peak = sky B (Belfast). Include dithering in the fragment shader to prevent banding at blend boundaries. The vertex shader must use standard `projectionMatrix * modelViewMatrix * vec4(position, 1.0)` — not the flat quad `vec4(position.xy, 0.0, 1.0)` used by equirect wall shaders.
+
+62. **(v11.1) When replacing MeshBasicMaterial with ShaderMaterial, update all property access.** `MeshBasicMaterial` has `.color` for tinting; `ShaderMaterial` does not. After converting the sky sphere to ShaderMaterial, all `.color.setRGB()` calls in the render loop must change to `.uniforms.tintColor.value.setRGB()`. Missing this causes silent black rendering.
+
+63. **(v11.1) Bird loop homing is a dead end — use fade-out/fade-in instead.** Three iterations of position/heading homing all failed: (a) per-frame 0.08 fractional blend never reaches target, (b) smoothstep time-absolute blend with 30s window freezes birds in place for too long, (c) tight 8s window causes visible retracing. The correct solution: scale birds to 0 over the last 8 seconds, silently reset positions at t=0, scale back up over the first 8 seconds. No homing math, no unnatural movement. Birds fly naturally for 29:44 of the 30-minute loop.
+
+64. **(v11.1) Planet animation loops require integer cycle alignment.** If a GLB model has animations played via `AnimationMixer.setTime()`, the animation time at t=1800 must exactly equal t=0. Calculate: `nCycles = Math.round(totalAnimTime / clipDuration)`, then `loopAnimTime = nCycles * clipDuration`. Use `setTime(((time % 1800) / 1800) * loopAnimTime)`. Also: if `action.timeScale` was set during setup AND `setTime()` is used in the render loop, the speed is double-applied. Set `timeScale = 1` and control speed entirely via `setTime()` math.
+
+65. **(v11.1) The slim HTML file needs a live preview loop for browser testing.** The render HTML only exposes `SABDA_RENDER_FRAME()` for Puppeteer — opening it directly shows a black screen. Add a live preview fallback gated by `if (!window.__SABDA_PUPPETEER__)` that calls `SABDA_RENDER_FRAME(liveT)` + `renderer.render(compScene, compCam)` via `requestAnimationFrame`. Include a time scrub slider (0–1800s) with play/pause, warmth/mix readout, and sky label. This is essential for rapid visual iteration without running the full render pipeline.
+
+66. **(v11.1) Headless Chrome on Mac requires ANGLE/Metal for WebGL.** The default `--use-gl=egl` flag fails on macOS with "WebGL context could not be created". Use: `--use-gl=angle --use-angle=metal --ignore-gpu-blocklist --enable-gpu`. Without these, Chrome falls back to software rendering (no WebGL at all).
+
+67. **(v11.1) Puppeteer page load: use domcontentloaded, not networkidle0.** With base64-embedded assets (two 8K sky textures = 27MB), `networkidle0` hangs waiting for data URL "network" activity to settle. Use `waitUntil: 'domcontentloaded'` for page load, then `waitForFunction(() => window.SABDA_READY === true)` to confirm all assets have loaded via the `checkReady()` counter.
+
+68. **(v11.1) Assembly script must handle cross-scene assets.** When crossfading between two scenes' skies, the assembly script needs to pull assets from a different scene's asset folder. The Evening scene's `assemble_evening.py` injects `skydata_b` from `assets_belfast/skydata.b64`. Each new cross-scene asset needs: (a) a `<script id="...">ASSET_PLACEHOLDER</script>` tag in the slim HTML, (b) a corresponding entry in the assembly script with the correct source path.
 
 ---
 
