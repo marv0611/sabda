@@ -168,13 +168,13 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         // 1. Black floor lift — subtle, prevents dark patches in overlap zones
         col.rgb = col.rgb * 0.97 + 0.015;
 
-        // 2. Mild contrast boost — blend between linear and S-curve (50% strength)
+        // 2. Moderate contrast boost — 60% S-curve blend
         vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
-        col.rgb = mix(col.rgb, scurve, 0.4);
+        col.rgb = mix(col.rgb, scurve, 0.55);
 
-        // 3. Gentle saturation boost — 12% to compensate for projector washout
+        // 3. Saturation boost — 18% 
         float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
-        col.rgb = mix(vec3(luma), col.rgb, 1.12);
+        col.rgb = mix(vec3(luma), col.rgb, 1.18);
 
         // 4. Gentle vignette on vertical edges — helps blend zones
         float edgeFade = smoothstep(0.0, 0.03, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
@@ -694,7 +694,7 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
 
   // ── BREATHING + COLOUR ──
   const b = br(time), hue = (time/CCYCLE)%1;
-  colT.setHSL(hue,0.65,0.40); colC.lerp(colT,0.005);
+  colT.setHSL(hue,0.62,0.44); colC.lerp(colT,0.005);
   // Fix 5: Colour lerp reset near loop boundary (v11 — exponential convergence)
   const colLoopT = time % 1800;
   if (colLoopT > 1790) {
