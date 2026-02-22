@@ -404,10 +404,14 @@ contentScene.add(rayGroup);
 const shootingStarState = {
   active: false, timer: 1,
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, maxLife: 0,
-  prevPos: new THREE.Vector3(),
 };
-// Shooting star = thin stretched quad (bright streak line)
-const ssGeo = new THREE.PlaneGeometry(1, 1);
+// Shooting star = 2-triangle quad, vertices updated each frame in world space
+const ssGeo = new THREE.BufferGeometry();
+const ssVerts = new Float32Array(6 * 3); // 6 vertices (2 triangles)
+const ssUvs = new Float32Array(6 * 2);
+ssUvs.set([0,1, 1,1, 0,0, 1,1, 1,0, 0,0]); // head at uv.y=1, tail at uv.y=0
+ssGeo.setAttribute('position', new THREE.BufferAttribute(ssVerts, 3));
+ssGeo.setAttribute('uv', new THREE.BufferAttribute(ssUvs, 2));
 const ssMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
   uniforms: {
@@ -424,22 +428,20 @@ const ssMat = new THREE.ShaderMaterial({
     uniform vec3 uColor;
     varying vec2 vUv;
     void main() {
-      // Bright head at uv.y=1, fading tail toward uv.y=0
-      float headGlow = pow(vUv.y, 2.0);
-      // Dual-layer: bright core + soft outer glow
+      float headGlow = pow(vUv.y, 2.5);
       float cx = abs(vUv.x - 0.5) * 2.0;
-      float core = pow(max(0.0, 1.0 - cx), 4.0);        // tight bright center
-      float glow = pow(max(0.0, 1.0 - cx), 1.5) * 0.35; // soft wide halo
+      float core = pow(max(0.0, 1.0 - cx), 6.0);
+      float glow = pow(max(0.0, 1.0 - cx), 1.8) * 0.25;
       float centerLine = core + glow;
-      // Extra bright head point in top 15%
-      float headBoost = smoothstep(0.85, 1.0, vUv.y) * 0.6;
+      float headBoost = smoothstep(0.88, 1.0, vUv.y) * 0.7;
       float alpha = headGlow * centerLine * uOpacity + headBoost * uOpacity * core;
       gl_FragColor = vec4(uColor, clamp(alpha, 0.0, 1.0));
     }
   `,
 });
 const ssStreak = new THREE.Mesh(ssGeo, ssMat);
-ssStreak.visible = false; contentScene.add(ssStreak);
+ssStreak.visible = false; ssStreak.frustumCulled = false;
+contentScene.add(ssStreak);
 
 // ── DUST PARTICLES ──
 const DUST_COUNT = 250;
@@ -740,34 +742,47 @@ window.SABDA_RENDER_FRAME = function(simTime) {
   }
   if (ss.active) {
     ss.life -= dt;
-    const progress = 1 - ss.life / ss.maxLife;  // 0→1
-    // Brightness: instant on, sustain, gentle fade out at end
+    const progress = 1 - ss.life / ss.maxLife;
+    // Opacity: instant on, sustain, gentle fade
     let opacity;
     if (progress < 0.05) opacity = progress / 0.05;
     else if (progress < 0.6) opacity = 1.0;
-    else opacity = Math.pow((1 - progress) / 0.4, 0.7);  // gentle power curve fadeout
+    else opacity = Math.pow((1 - progress) / 0.4, 0.7);
     opacity = Math.max(0, opacity);
     // Move head forward
-    ss.prevPos.copy(ss.pos);
     ss.pos.addScaledVector(ss.vel, dt);
-    // Fixed tail length — no growing, no retract
-    const tailLen = 220;
+    // Head and tail positions in world space
     const velDir = ss.vel.clone().normalize();
-    // Anchor quad so head is at top (uv.y=1) — offset position BACK by half tail
-    const anchor = ss.pos.clone().sub(velDir.clone().multiplyScalar(tailLen * 0.5));
-    ssStreak.position.copy(anchor);
-    // Thin ethereal streak
-    const streakWidth = 2.5;
-    ssStreak.scale.set(streakWidth, tailLen, 1);
-    ssStreak.lookAt(0, 0, 0);
-    // Rotate to align with velocity direction in screen space
-    const velLocal = velDir.clone().applyQuaternion(ssStreak.quaternion.clone().invert());
-    const angle = Math.atan2(velLocal.x, velLocal.y);
-    ssStreak.rotateZ(-angle);
-    // Update material — warm white fading to cool
+    const head = ss.pos.clone();
+    const tail = ss.pos.clone().sub(velDir.clone().multiplyScalar(220));
+    // Build camera-facing quad: width perpendicular to both velocity and camera direction
+    const camDir = head.clone().normalize(); // camera is at origin
+    const side = velDir.clone().cross(camDir).normalize();
+    const hw = 1.2; // half-width — thin ethereal line
+    // 6 vertices: 2 triangles forming a quad from tail to head
+    const p = ssGeo.attributes.position.array;
+    // Triangle 1: headL, headR, tailL
+    const hL = head.clone().add(side.clone().multiplyScalar(hw));
+    const hR = head.clone().sub(side.clone().multiplyScalar(hw));
+    const tL = tail.clone().add(side.clone().multiplyScalar(hw));
+    const tR = tail.clone().sub(side.clone().multiplyScalar(hw));
+    p[0]=hL.x; p[1]=hL.y; p[2]=hL.z;   // headL  uv(0,1)
+    p[3]=hR.x; p[4]=hR.y; p[5]=hR.z;   // headR  uv(1,1)
+    p[6]=tL.x; p[7]=tL.y; p[8]=tL.z;   // tailL  uv(0,0)
+    // Triangle 2: headR, tailR, tailL
+    p[9]=hR.x;  p[10]=hR.y; p[11]=hR.z;  // headR  uv(1,1)
+    p[12]=tR.x; p[13]=tR.y; p[14]=tR.z;  // tailR  uv(1,0)
+    p[15]=tL.x; p[16]=tL.y; p[17]=tL.z;  // tailL  uv(0,0)
+    ssGeo.attributes.position.needsUpdate = true;
+    // Reset transform — geometry is in world space
+    ssStreak.position.set(0, 0, 0);
+    ssStreak.rotation.set(0, 0, 0);
+    ssStreak.scale.set(1, 1, 1);
+    // Material
     ssMat.uniforms.uOpacity.value = opacity;
     ssMat.uniforms.uColor.value.setRGB(1, 0.97 - progress * 0.05, 0.92 - progress * 0.1);
     if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 2 + Math.random() * 2; }
+  }
   }
 
 
