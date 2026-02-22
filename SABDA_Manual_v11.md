@@ -515,49 +515,189 @@ const floorMat = new THREE.MeshStandardMaterial({
 
 ---
 
-## 8. Shooting Star System
+## 8. Shooting Star System (v11.5)
 
-### Natural Behaviour Requirements
+### Architecture: World-Space Shader Quads on Sky Dome
 
-Shooting stars must look like real meteors â€” nothing unnatural. Key properties:
+Shooting stars are rendered as a single 6-vertex PlaneBufferGeometry with a custom ShaderMaterial. The head and tail positions are calculated each frame and written directly to vertex positions in world space. The quad is billboarded toward the camera using a cross product of the velocity direction and camera direction.
 
-1. **Shallow descent angle** â€” 8-22% below horizontal (not steep dives)
-2. **Brief flash** â€” 0.7-1.1 seconds visible
-3. **Fade curve** â€” instant appearance, smooth exponential fade-out
-4. **Random direction** â€” can appear anywhere in the upper sky, travel left or right
-5. **Infrequent** â€” approximately 1 per minute (50-75 second random interval)
-6. **First appearance** â€” 45-75 seconds into the scene (not immediately)
+**Critical design: meteors follow the sky dome curvature.** A straight-line velocity would fly the meteor off the sphere into empty space — invisible to the viewer. Instead, the meteor's position is re-projected onto the dome surface each frame (`pos.normalize().multiplyScalar(340)`), and the tail is placed via Rodrigues rotation along the sphere.
 
-### Implementation: Sphere + Cylinder (NOT Custom Shaders)
+### Tail Length: Angular Arc on Dome
+
+Tail length is defined as an angular arc on the sky dome, NOT a linear distance:
 
 ```javascript
-// Head: bright glowing sphere
-const ssHeadGeo = new THREE.SphereGeometry(1.5, 8, 8);
-const ssHeadMat = new THREE.MeshBasicMaterial({ 
-  color: 0xfff8e0, fog: false, toneMapped: false 
-});
-
-// Tail: tapered cone pointing backwards
-const ssTailGeo = new THREE.CylinderGeometry(0.0, 1.2, 1.0, 8, 1);
-const ssTailMat = new THREE.MeshBasicMaterial({ 
-  color: 0xffe0a0, fog: false, transparent: true, opacity: 0.7, toneMapped: false
-});
+const tailAngle = 0.2 + ss.tailBonus * 0.003;
+// normal: 0.2-0.35 rad (12-20 degrees)
+// giant:  0.8-2.0 rad (46-115 degrees)
 ```
 
-### Animation Parameters
+Using Rodrigues rotation to place the tail point:
+```javascript
+const cosA = Math.cos(tailAngle), sinA = Math.sin(tailAngle);
+const tail = head.clone().multiplyScalar(cosA)
+  .add(rotAxis.clone().cross(head).multiplyScalar(sinA))
+  .add(rotAxis.clone().multiplyScalar(rotAxis.dot(head) * (1 - cosA)));
+```
+
+### 50/50 Size Mix
+
+Half of shooting stars are modest streaks, half are giant wall-crossers:
 
 ```javascript
-timer: 45 + Math.random() * 30,           // First one: 45-75s
-ss.timer = 50 + Math.random() * 25;       // Subsequent: 50-75s (~1/min)
-const sR = 340;                             // Distance (inside sky sphere at 400)
-const sElev = (25 + Math.random() * 35) * Math.PI / 180;  // 25-60Â° above horizon
-const speed = 180 + Math.random() * 100;    // 180-280 m/s
-const downFrac = 0.08 + Math.random() * 0.12;  // 8-20% downward
-ss.maxLife = 0.7 + Math.random() * 0.4;    // 0.7-1.1 seconds
-const opacity = progress < 0.06 ? progress / 0.06 : Math.pow(Math.max(0, 1 - progress), 1.6);
+const isGiant = Math.random() > 0.5;
+ss.tailBonus = isGiant ? 200 + Math.random() * 400 : Math.random() * 50;
+ss.maxLife = isGiant ? 4.0 + Math.random() * 2.0 : 2.0 + Math.random() * 1.0;
 ```
+
+- **Normal** (50%): 12-20 degree arc, 2-3 seconds — fills part of one wall
+- **Giants** (50%): 46-115 degree arc, 4-6 seconds — sweeps across walls, exploiting the 360 degree room
+
+### Entry Angle and Travel Direction
+
+```javascript
+const entryAngle = (2 + Math.random() * 5) * Math.PI / 180;  // 2-7 degrees from horizontal
+const travelTheta = sTheta + 0.4 + Math.random() * 0.6;      // Wide diagonal sweep
+const speed = 120 + Math.random() * 80;                        // 120-200 varied pace
+```
+
+Shallow 2-7 degree entry creates nearly horizontal sweeps that cross from one wall to the next — leveraging the 360 degree projection for maximum immersion.
+
+### Production Frequency
+
+```javascript
+ss.timer = 25 + Math.random() * 10;  // 25-35s between stars (avg 30s)
+```
+
+For testing, set `ss.timer = 0` for back-to-back rapid fire.
+
+### Common Mistakes with Shooting Stars
+
+| Mistake | Why It Fails | Fix |
+|---------|-------------|-----|
+| Straight-line velocity | Meteor flies off dome into empty space, becomes invisible | Re-project onto dome each frame: `pos.normalize().multiplyScalar(340)` |
+| Linear tail length (pixels) | Tail goes through sphere interior, not visible | Use angular arc with Rodrigues rotation |
+| Sphere + Cylinder geometry | Looks like a game effect, not a natural meteor | Shader quad with head-to-tail gradient |
+| Steep entry (>20 degrees) | Looks like objects falling, not meteors | Keep 2-7 degrees from horizontal |
+| Fixed tail length | All meteors look identical | 50/50 mix of normal/giant with per-spawn randomness |
+| Spawning isGiant after maxLife | isGiant is undefined, crashes render loop | Always declare variables before use |
 
 ---
+
+## 8a. Bird System (v11.5)
+
+### Flight Physics
+
+Birds use simple spring-based physics with several layers of correction:
+
+**Horizontal movement:**
+```javascript
+bd.heading += bd.turnRate;
+bd.ctr.position.x += Math.sin(bd.heading) * bd.cruiseSpeed * dt * 30;
+bd.ctr.position.z += Math.cos(bd.heading) * bd.cruiseSpeed * dt * 30;
+```
+
+**Vertical movement** — spring toward target altitude:
+```javascript
+const alt = bd.homeY + (bd.isGliding ? -0.3 : 0.2);
+bd.vy += (alt - bd.ctr.position.y) * 0.02 * dt;
+bd.vy *= Math.pow(0.96, dt * 30);  // damping — dt-scaled!
+bd.ctr.position.y += bd.vy;
+```
+
+### Home-Pull Steering
+
+Birds naturally drift. A gentle home-pull kicks in when they stray too far:
+
+```javascript
+if (dist > bd.homeDist + 5) {
+  const tc = Math.atan2(-pz, -px);
+  let hd = tc - bd.heading;
+  // normalize angle...
+  btb = hd * 0.004 * (1 + Math.min(1, (dist - bd.homeDist - 5) * 0.03) * 2);
+}
+```
+
+**Critical: turn rate must scale with timeScale.** At 30x timelapse, the bird moves 30x faster per frame but can only turn a fixed amount. The turn rate clamp must scale:
+
+```javascript
+const maxTurn = 0.012 * dt * 30;  // scales with speed
+bd.turnRate = Math.max(-maxTurn, Math.min(maxTurn, bd.turnRate));
+```
+
+Without this, birds escape the scene at high speed because they can't steer fast enough.
+
+### Hard Boundary (Safety Net)
+
+If a bird reaches dist > 40 despite the home-pull (common at 30x timelapse), teleport it back to its home orbit:
+
+```javascript
+if (dist > 40) {
+  const a = Math.random() * Math.PI * 2;
+  bd.ctr.position.x = Math.cos(a) * bd.homeDist;
+  bd.ctr.position.z = Math.sin(a) * bd.homeDist;
+  bd.heading = a + Math.PI / 2 + (Math.random() - 0.5) * 0.5;
+}
+```
+
+At dist > 40, birds are offscreen — the teleport is invisible.
+
+### Model Direction Fix
+
+The bird GLB model's visual forward direction is ambiguous. From far away, backward-flying birds look fine. From close up, the head is visibly facing the wrong way.
+
+**Solution: flip close birds 180 degrees, leave far birds as-is, smooth blend in between:**
+
+```javascript
+const flipBlend = Math.min(1, Math.max(0, (dist - 22) / 6));
+bd.ctr.rotation.y = bd.heading + Math.PI * (1 - flipBlend);
+// dist <= 22: +PI (faces forward), dist >= 28: +0 (keep backward look)
+```
+
+### Organic Flapping
+
+Mechanical flapping is the number one immersion-breaker for birds. Several techniques make it natural:
+
+1. **Slow transitions** (0.4 lerp rate, not 1.5) — wings ease in and out like breathing
+2. **Varied glide speed** (0.15-0.35 timeScale, not fixed 0.35) — each bird glides differently
+3. **Sinusoidal modulation** — continuous subtle wave on flap speed, unique per bird:
+   ```javascript
+   const flapWave = 1.0 + Math.sin(time * (0.8 + bd._fadeOffset * 0.3)) * 0.12;
+   ```
+4. **Longer cycles** — 3-7 second glide/flap durations (not 1.5-5) for lazier rhythm
+
+### 30-Minute Loop Transition
+
+Birds fade out in the last 12 seconds and fade in during the first 12 seconds, staggered per bird (~1.5s offset each):
+
+```javascript
+const loopFadeDur = 10;
+const stagger = bd._fadeOffset * 1.2;  // 0, 1.56, 3.12, 4.68, 6.24, 7.8
+```
+
+While invisible, each bird resets to its deterministic spawn position. The first 12 seconds of every loop look identical. Mid-loop flight paths are randomized (natural behavior) but start/end are always the same.
+
+### Altitude Safety Layers
+
+| Layer | Range | Behavior |
+|-------|-------|----------|
+| Spring target | homeY +/- 0.3/0.2 | Normal oscillation |
+| Soft push | 2.8 / 6.5 | Gentle correction |
+| Hard backstop | 2.0 / 7.5 | Absolute clamp |
+| Velocity clamp | +/-0.15 | Prevents runaway |
+
+### Common Bird Mistakes
+
+| Mistake | Fix |
+|---------|-----|
+| Turn rate not dt-scaled | Birds escape at timelapse — maxTurn = 0.012 * dt * 30 |
+| Home-pull too aggressive | Birds whip around in tight U-turns — use 0.004 base, not 0.015 |
+| Heading snap at boundary | Birds jitter at edge — teleport to home orbit instead |
+| Physics running while invisible | Velocity accumulates, bird shoots off on fade-in — freeze physics when birdFade < 0.01 |
+| Fixed fade for all birds | Synchronized pop — stagger 1.5s per bird |
+| Respawn at homeY + 3 | Visible drop on entry — respawn at homeY |
+| Damping not dt-scaled | Different behavior at different frame rates — use Math.pow(0.96, dt * 30) |
 
 ## 9. Room Fog â€” Tuned for 15m Depth
 
@@ -1378,6 +1518,7 @@ HAP Q uses GPU-accelerated decompression but produces much larger files (~10×).
 | **v11** | **Render-only HTML architecture (separate from interactive viewer), loop check renderer (render_loopcheck.js), bird homing fix (radial nudge replaces heading-steering), preview mode dt/time mismatch documentation, commit discipline rule** |
 | **v11.1** | **Dual-sky Belfast crossfade (single sphere + shader mix), bird facing fix (removed +PI), staggered bird fade at loop boundary, streak-based shooting stars (shader quad), planet animation loop fix (integer cycle alignment), live browser preview with time scrub slider, render.js Puppeteer script, WebGL Metal/ANGLE backend for Mac** |
 
+| **v11.5** | **Shooting star dome-following with Rodrigues rotation, 50/50 size mix (12-115 degree arc wall-crossers), bird physics overhaul (dt-scaled turns, hard teleport boundary, model flip by distance, organic flapping with sinusoidal modulation), projection optimization shader pipeline (S-curve contrast 80%, saturation boost 28%, black floor lift, highlight ceiling, edge softening), timelapse test mode (T key, 30x), 30-minute loop fade transition for birds, lighting adjustments for projector environments** |
 ---
 
 ## 20. Lessons Learned Log (v8 + v9 + v10 + v11 Additions)
@@ -1479,6 +1620,31 @@ Building on all v7 lessons (1-30), v8 adds lessons 31-42, v9 adds lessons 43-49,
 74. **(v11.1) Shooting star frequency for wellness: ~30s average.** Original 6-14s interval was too frequent for a meditative environment. Set to `timer = 25 + Math.random() * 10` for 25-35s gaps (avg 30s). Initial spawn timer 8s for testing convenience.
 
 ---
+
+75. **(v11.5) Shooting stars must follow the sky dome curvature, not fly in straight lines.** A straight-line velocity causes the meteor to leave the dome surface and become invisible. Re-project the position onto the dome each frame with `pos.normalize().multiplyScalar(340)`. Use Rodrigues rotation for the tail arc. This single change is what makes wall-crossing shooting stars possible.
+
+76. **(v11.5) 50/50 size mix creates the best shooting star variety.** All-large shooting stars feel heavy and unnatural. All-small ones are underwhelming. A 50/50 split — half modest streaks (12-20 degree arc), half giant wall-crossers (46-115 degree arc) — creates a natural and surprising distribution where occasional massive streaks feel special.
+
+77. **(v11.5) Bird turn rate must scale with timeScale.** At 30x timelapse, birds move 30x faster per frame but the turn rate clamp was fixed at 0.03 rad. Birds couldn't steer fast enough and flew out of the scene. Fix: maxTurn = 0.012 * dt * 30. This is the kind of bug that only appears in timelapse mode and looks fine at normal speed.
+
+78. **(v11.5) Bird home-pull must be gentle — 0.004 base, not 0.015.** Aggressive home-pull (0.015) causes all birds to do synchronized sharp U-turns at the edge of their home zone. At 0.004, they make wide lazy arcs — like real birds riding thermals. The birds should barely seem to be correcting course.
+
+79. **(v11.5) Hard teleport is better than heading-snap for escaped birds.** When a bird crosses dist > 40, snapping its heading inward doesn't work — it's already moving too fast, oscillates at the boundary. Instead, teleport it to a random point on its home orbit with a tangential heading. At dist > 40 it's offscreen anyway — the teleport is invisible.
+
+80. **(v11.5) Bird model direction varies by viewing distance.** The same bird model can look like it's flying forward from far away but clearly backward from close up. Fix: flip rotation 180 degrees for close birds (dist <= 22), keep original for far birds (dist >= 28), smooth blend in the transition zone. Don't flip all birds — the backward look works fine at distance.
+
+81. **(v11.5) Organic flapping requires slow transitions and sinusoidal modulation.** The lerp rate between glide and flap states is the biggest factor. At 1.5 (fast), the switch is mechanical. At 0.4 (slow), wings ease in and out naturally. Adding a per-bird sinusoidal wave (sin(time * unique_freq) * 0.12) prevents flapping from ever being perfectly constant — real birds never flap at a fixed rate.
+
+82. **(v11.5) Projection optimization must be applied ONCE at the output shader only.** Applying S-curve contrast to both the sky sphere shader and the equirect output shader doubles the effect — darks crush to black, highlights clip. The filmic look comes from applying it once at the very end of the pipeline, where it affects all content equally.
+
+83. **(v11.5) Filmic shoulder (1-exp(-x*k)) fights S-curve contrast.** The S-curve adds punch by deepening darks and brightening brights. The exponential shoulder then compresses everything back toward the middle. Result: all the contrast work is undone. Use a simple soft ceiling instead: min(col, 0.85 + (col - 0.85) * 0.3) — only compresses above 85%, leaves everything else alone.
+
+84. **(v11.5) Projected content needs ~15% lower overall brightness than monitor content.** Projectors in a dark room amplify perceived brightness. Exposure, sun intensity, ambient, and fog color all need to come down. But reduce them evenly — don't just drop exposure, as that changes the tone mapping curve. Adjust each lighting component independently.
+
+85. **(v11.5) Variable declaration order matters in spawn blocks.** If isGiant is used in maxLife calculation but declared after it, the entire render loop crashes silently. Always declare spawn-time variables at the top of the spawn block before any code that references them.
+
+86. **(v11.5) Timelapse mode reveals physics bugs that normal speed hides.** At 1x speed, a bird with insufficient turn rate correction slowly drifts outward over 10 minutes — barely noticeable. At 30x, the same bird flies out of the scene in 20 seconds. Always test new physics at both normal and timelapse speed.
+
 
 ## 21. Content Calendar
 
@@ -1588,6 +1754,145 @@ Claude conversations have a finite context window. Every token counts. The SABDA
 > **Lesson 60: Context window management is a production constraint.** Treat it like render budget — every token has a cost. Slim project file + targeted manual reads + no transcript pasting = 3-4× longer conversations.
 
 ---
+
+
+---
+
+## 25. Projection Optimization Pipeline (v11.5)
+
+### The Problem
+
+Content that looks perfect on a monitor often looks poor when projected in the SABDA room:
+
+1. **Washed-out colors** — projector stray light + room ambient desaturates the image
+2. **White blowout patches** — bright areas become flat white blinding spots
+3. **Black seams at projector overlaps** — doubled black level in blend zones creates dark stripes
+4. **Color banding in gradients** — 8-bit quantization + projector gamma creates visible steps
+
+### The Solution: Shader-Level Post-Processing
+
+A projection optimization pipeline runs in the equirect output shader — the final stage before pixels hit the wall. This is the ONLY place to apply these corrections (not on the sky, not on the scene — only at output).
+
+**Critical: apply corrections ONCE, at the output stage only.** Applying S-curve contrast to both the sky shader AND the output shader doubles the effect and crushes the image.
+
+### The Pipeline (Order Matters)
+
+```glsl
+// 1. Black floor lift — raises minimum brightness
+col.rgb = col.rgb * 0.97 + 0.015;
+
+// 2. S-curve contrast — richer midtones
+vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
+col.rgb = mix(col.rgb, scurve, 0.80);
+
+// 3. Saturation boost — compensates projector washout
+float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+col.rgb = mix(vec3(luma), col.rgb, 1.28);
+
+// 4. Highlight ceiling — prevents white blowout
+col.rgb = min(col.rgb, 0.85 + (col.rgb - 0.85) * 0.3);
+
+// 5. Edge softening — helps projector blend zones
+float edgeFade = smoothstep(0.0, 0.03, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
+float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
+col.rgb *= edgeFade * topBottomFade * 0.05 + 0.95;
+
+// 6. Dither — prevents banding (always last)
+col.rgb += dither(gl_FragCoord.xy) / 255.0;
+```
+
+### What Each Step Does
+
+| Step | Purpose | Without It |
+|------|---------|-----------|
+| Black floor lift (1.5%) | Raises darkest pixels so projector overlap zones have minimal relative difference | Dark seams/patches where projectors overlap |
+| S-curve contrast (80%) | Deepens darks, enriches midtones — counteracts projector ambient haze | Flat, washed-out image |
+| Saturation boost (28%) | Pre-compensates for stray light mixing that desaturates the projected image | Pastel, lifeless colors |
+| Highlight ceiling (85% + 30% compression) | Prevents bright areas from becoming flat white glare spots | Blinding white patches at sunset/horizon |
+| Edge softening (3% horizontal, 2% vertical) | Reduces brightness at wall panel edges where projectors overlap | Visible bright seams at blend zones |
+| Dither (plus/minus 0.5 LSB) | Breaks up 8-bit quantization bands in smooth gradients | Visible color stepping in sky |
+
+### Tuning Guidelines
+
+- Too washed out: Increase S-curve blend (0.80 to 0.90) and saturation (1.28 to 1.35)
+- Too contrasty / pixelated: Decrease S-curve blend (0.80 to 0.60)
+- White patches blinding: Lower highlight ceiling (0.85 to 0.80)
+- Dark patches at overlaps: Increase black floor lift (0.015 to 0.025)
+- Colors oversaturated: Decrease saturation (1.28 to 1.15)
+
+### What Cannot Be Fixed from Content Side
+
+The following issues require Watchout / projector calibration:
+
+| Issue | Watchout Fix |
+|-------|------------|
+| Dark seams between projectors | Adjust edge blend width to match actual physical overlap |
+| Uneven brightness across walls | Adjust per-projector brightness/gamma curves |
+| Color mismatch between projectors | Calibrate white point per projector |
+| Black level doubled in overlaps | Enable black level compensation in Watchout |
+| Geometric misalignment | Re-run projector alignment / warping |
+
+### Common Mistakes
+
+| Mistake | Why It Fails | Fix |
+|---------|-------------|-----|
+| Applying contrast to BOTH sky shader and output shader | Double S-curve crushes image | Apply ONLY at the output equirect shader |
+| Using filmic shoulder (1-exp(-x*k)) after S-curve | The shoulder compresses everything back, eating the contrast | Use simple soft ceiling: min(col, 0.85 + (col - 0.85) * 0.3) |
+| Too much saturation (>1.35) | Colors become neon, unnatural | Stay at 1.20-1.30 range |
+| No highlight ceiling | Sunsets become flat white that is painful in a dark room | Always clamp highlights |
+| Edge fade too aggressive (>8%) | Visible vignette on each wall panel | Keep at 3-5% |
+
+### Lighting Parameter Adjustments for Projection
+
+| Parameter | Monitor Value | Projection Value | Reduction |
+|-----------|--------------|------------------|-----------|
+| Tone mapping exposure | 0.92 + b*0.18 | 0.82 + b*0.14 | ~12% |
+| Hemisphere intensity | 0.38 + b*0.10 | 0.32 + b*0.08 | ~16% |
+| Sun intensity | 0.55 + w*0.50 + b*0.12 | 0.45 + w*0.40 + b*0.10 | ~18% |
+| Ambient intensity | 0.34 + w*0.12 + b*0.08 | 0.28 + w*0.10 + b*0.06 | ~18% |
+| Fog color RGB | 0.55/0.43/0.52 | 0.45/0.36/0.44 | ~15% |
+| Color saturation (HSL) | 0.58, L 0.50 | 0.62, L 0.44 | More saturated, darker |
+
+Projectors in a dark room amplify perceived brightness. What looks balanced on a monitor is too bright when projected on 4 walls around you.
+
+---
+
+## 26. Timelapse Testing Mode (v11.5)
+
+Press **T** to toggle 30x speed — 30 minutes compresses to 1 minute for rapid testing of:
+- Bird movement patterns over the full cycle
+- Loop boundary transitions
+- Sky warmth cycle progression
+- Shooting star variety
+
+### Implementation
+
+```javascript
+let timeScale = 1;
+document.addEventListener('keydown', e => {
+  if (e.key === 'T' || e.key === 't') timeScale = timeScale === 1 ? 30 : 1;
+});
+// In render loop:
+const dt = (1/30) * timeScale;
+```
+
+### Critical: All Physics Must Scale with dt
+
+Any physics that doesn't scale with dt will break at 30x:
+
+| Element | Must scale | How |
+|---------|-----------|-----|
+| Bird horizontal movement | Yes | cruiseSpeed * dt * 30 |
+| Bird vertical spring | Yes | vy += force * dt |
+| Bird damping | Yes | Math.pow(0.96, dt * 30) |
+| Bird turn rate clamp | Yes | maxTurn = 0.012 * dt * 30 |
+| Bird flap animation | Cap it | Math.min(timeScale, baseTimeScale * 2) — wings don't go insane |
+| Shooting star life | Yes | ss.life -= dt |
+| Home-pull steering | Yes | inherits through dt |
+
+### Info Bar Display
+
+When timelapse is active, show a lightning bolt 30x indicator in red on the info overlay so it's obvious the scene is accelerated.
 
 ## 24. Archived Reference Data (Moved from Project File v1)
 
