@@ -787,14 +787,14 @@ window.SABDA_RENDER_FRAME = function(simTime) {
 if (!window.__SABDA_PUPPETEER__) {
   // Scrub UI
   const scrubDiv = document.createElement('div');
-  scrubDiv.style.cssText = 'position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.7);padding:8px 16px;border-radius:8px;font-family:monospace;color:#c4a882;font-size:12px;';
+  scrubDiv.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:20px;background:rgba(0,0,0,0.7);padding:20px 40px;border-radius:12px;font-family:monospace;color:#c4a882;font-size:48px;';
   const slider = document.createElement('input');
   slider.type = 'range'; slider.min = 0; slider.max = 1800; slider.step = 1; slider.value = 0;
-  slider.style.cssText = 'width:700px;cursor:pointer;';
+  slider.style.cssText = 'width:3000px;cursor:pointer;height:40px;';
   const info = document.createElement('span');
-  info.style.cssText = 'min-width:280px;white-space:nowrap;';
+  info.style.cssText = 'min-width:900px;white-space:nowrap;';
   const playBtn = document.createElement('button');
-  playBtn.textContent = '⏸'; playBtn.style.cssText = 'background:none;border:1px solid #c4a882;color:#c4a882;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:14px;';
+  playBtn.textContent = '⏸'; playBtn.style.cssText = 'background:none;border:2px solid #c4a882;color:#c4a882;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:48px;';
   scrubDiv.appendChild(playBtn);
   scrubDiv.appendChild(slider);
   scrubDiv.appendChild(info);
