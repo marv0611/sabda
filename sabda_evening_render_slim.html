@@ -730,7 +730,7 @@ window.SABDA_RENDER_FRAME = function(simTime) {
       const entryAngle = (5 + Math.random() * 7) * Math.PI / 180;
       // Consistent travel direction: always sweep "forward" from spawn point
       const travelTheta = sTheta + 0.3 + Math.random() * 0.3;
-      const speed = 130 + Math.random() * 50;  // slow enough to see the full streak
+      const speed = 150;  // consistent speed — no short/long randomness
       ss.vel.set(
         Math.cos(travelTheta) * Math.cos(entryAngle) * speed,
         -Math.sin(entryAngle) * speed,
@@ -753,9 +753,13 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     // Head and tail positions in world space
     const velDir = ss.vel.clone().normalize();
     const head = ss.pos.clone();
-    const tail = ss.pos.clone().sub(velDir.clone().multiplyScalar(220));
-    // Build camera-facing quad: width perpendicular to both velocity and camera direction
-    const camDir = head.clone().normalize(); // camera is at origin
+    // Tail length scales with how much the meteor moves across your view (not toward you)
+    const camDir = head.clone().normalize();
+    const velPerp = velDir.clone().sub(camDir.clone().multiplyScalar(velDir.dot(camDir)));
+    const perpSpeed = velPerp.length();  // 0 = moving toward camera, 1 = moving across view
+    const tailLen = 180 + perpSpeed * 120;  // 180-300 — always substantial, longer when crossing view
+    const tail = head.clone().sub(velDir.clone().multiplyScalar(tailLen));
+    // Build camera-facing quad
     const side = velDir.clone().cross(camDir);
     if (side.lengthSq() < 0.001) side.set(0, 1, 0); // fallback if parallel
     side.normalize();

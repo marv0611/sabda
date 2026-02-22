@@ -949,7 +949,7 @@ function animate() {
       ss.pos.set(Math.cos(sElev)*Math.cos(sTheta)*sR, Math.sin(sElev)*sR, Math.cos(sElev)*Math.sin(sTheta)*sR);
       const entryAngle = (5 + Math.random() * 7) * Math.PI / 180;
       const travelTheta = sTheta + 0.3 + Math.random() * 0.3;
-      const speed = 130 + Math.random() * 50;
+      const speed = 150;
       ss.vel.set(
         Math.cos(travelTheta) * Math.cos(entryAngle) * speed,
         -Math.sin(entryAngle) * speed,
@@ -969,8 +969,11 @@ function animate() {
     ss.pos.addScaledVector(ss.vel, dt);
     const velDir = ss.vel.clone().normalize();
     const head = ss.pos.clone();
-    const tail = ss.pos.clone().sub(velDir.clone().multiplyScalar(220));
     const camDir = head.clone().normalize();
+    const velPerp = velDir.clone().sub(camDir.clone().multiplyScalar(velDir.dot(camDir)));
+    const perpSpeed = velPerp.length();
+    const tailLen = 180 + perpSpeed * 120;
+    const tail = head.clone().sub(velDir.clone().multiplyScalar(tailLen));
     const side = velDir.clone().cross(camDir);
     if (side.lengthSq() < 0.001) side.set(0, 1, 0);
     side.normalize();
