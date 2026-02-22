@@ -742,9 +742,8 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     if (ss.timer <= 0 && loopT > 2 && loopT < 1785) {
       ss.active = true;
       // 50/50 mix: half are modest streaks, half are big wall-crossers
-      const isGiant = Math.random() > 0.5;
-      ss.tailBonus = isGiant ? 200 + Math.random() * 400 : Math.random() * 50;
-      ss.maxLife = isGiant ? 4.0 + Math.random() * 2.0 : 2.0 + Math.random() * 1.0;
+      ss.tailBonus = 150 + Math.random() * 400;  // all long: 150-550
+      ss.maxLife = 3.5 + Math.random() * 2.5;  // 3.5-6s — all substantial
       ss.life = ss.maxLife;
       // Spawn in upper sky
       const sTheta = Math.random() * Math.PI * 2;
@@ -781,7 +780,7 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     const head = ss.pos.clone();
     // Tail: trace back along the dome surface using velocity direction
     // Angular tail length: tailLen in degrees mapped to radians on the sphere
-    const tailAngle = (0.2 + ss.tailBonus * 0.003);  // normal: 0.2-0.35 rad (12-20°), giants: 0.8-2.0 rad (46-115°)
+    const tailAngle = (0.65 + ss.tailBonus * 0.003);  // 0.65-2.3 rad (37-132 degrees) — all long
     const velDir = ss.vel.clone().normalize();
     // Walk back along the dome from head in the opposite direction of velocity
     const tailDir = velDir.clone().negate().normalize();
