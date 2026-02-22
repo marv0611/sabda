@@ -787,7 +787,7 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     // Material
     ssMat.uniforms.uOpacity.value = opacity;
     ssMat.uniforms.uColor.value.setRGB(1, 0.97 - progress * 0.05, 0.92 - progress * 0.1);
-    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 1.5 + Math.random() * 1; }
+    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 0; }
   }
 
 
