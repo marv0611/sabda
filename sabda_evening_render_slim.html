@@ -584,8 +584,8 @@ loader.load(b64ToUrl('planetdata','model/gltf-binary'), gltf => {
   const model = gltf.scene;
   model.traverse(c => { if(c.isMesh){c.frustumCulled=false; if(c.material){
     const mn=(c.material.name||'').toLowerCase(), oMap=c.material.map, oNorm=c.material.normalMap;
-    if(mn.includes('cloud')){c.material=new THREE.MeshPhysicalMaterial({map:oMap,normalMap:oNorm,transparent:true,opacity:0.35,roughness:0.3,metalness:0,emissive:new THREE.Color(0xc0a0f0),emissiveIntensity:0.10,side:THREE.FrontSide,depthWrite:false});}
-    else{c.material=new THREE.MeshPhysicalMaterial({map:oMap,normalMap:oNorm,roughness:0.45,metalness:0.05,emissive:new THREE.Color(0x6633aa),emissiveIntensity:0.25,clearcoat:0.12,clearcoatRoughness:0.4});}
+    if(mn.includes('cloud')){c.material=new THREE.MeshPhysicalMaterial({map:oMap,normalMap:oNorm,transparent:true,opacity:0.40,roughness:0.3,metalness:0,emissive:new THREE.Color(0xd0b0ff),emissiveIntensity:0.15,side:THREE.FrontSide,depthWrite:false});}
+    else{c.material=new THREE.MeshPhysicalMaterial({map:oMap,normalMap:oNorm,roughness:0.45,metalness:0.05,emissive:new THREE.Color(0x7744cc),emissiveIntensity:0.35,clearcoat:0.15,clearcoatRoughness:0.35});}
   }}});
   planetGroup.add(model);
   if(gltf.animations&&gltf.animations.length>0){planetMixer=new THREE.AnimationMixer(model);const a=planetMixer.clipAction(gltf.animations[0]);a.timeScale=1;a.play();}
@@ -675,7 +675,7 @@ window.SABDA_RENDER_FRAME = function(simTime) {
 
   // ── BREATHING + COLOUR ──
   const b = br(time), hue = (time/CCYCLE)%1;
-  colT.setHSL(hue,0.45,0.45); colC.lerp(colT,0.004);
+  colT.setHSL(hue,0.58,0.50); colC.lerp(colT,0.005);
   // Fix 5: Colour lerp reset near loop boundary (v11 — exponential convergence)
   const colLoopT = time % 1800;
   if (colLoopT > 1790) {
@@ -688,8 +688,8 @@ window.SABDA_RENDER_FRAME = function(simTime) {
   hemi.color.setRGB(0.77*tR,0.50*tG,0.25*tB);
   hemi.groundColor.setRGB(0.10*tB,0.15*tG,0.12*tR);
   rim.color.setRGB(0.25*tB,0.31*tG,0.50*tR);
-  renderer.toneMappingExposure = 0.9+b*0.12;
-  hemi.intensity = 0.35+b*0.06;
+  renderer.toneMappingExposure = 0.92+b*0.18;
+  hemi.intensity = 0.38+b*0.10;
 
   // ── SKY WARMTH ──
   const skyPhase = (time/1800)*Math.PI*2;
@@ -697,18 +697,18 @@ window.SABDA_RENDER_FRAME = function(simTime) {
   const warmth = Math.pow(warmthRaw, 2.0);  // squash toward 0 = Belfast dominates ~70%
   skySphereMat.uniforms.mixVal.value = 1.0 - warmth;  // warmth=1 → sky A (evening), warmth=0 → sky B (belfast)
   skySphereMat.uniforms.tintColor.value.setRGB(0.85+warmth*0.15, 0.82+warmth*0.10, 0.88+(1-warmth)*0.12);
-  sun.intensity = 0.5+warmth*0.4+b*0.1;
+  sun.intensity = 0.55+warmth*0.50+b*0.12;
   sun.color.setRGB(tR*(0.8+warmth*0.2), 0.56*tG*(0.6+warmth*0.4), 0.31*tB*(0.7+warmth*0.3));
-  ambient.intensity = 0.30+warmth*0.10+b*0.06;
+  ambient.intensity = 0.34+warmth*0.12+b*0.08;
   contentScene.fog.color.setRGB(0.55+warmth*0.10, 0.43+warmth*0.05, 0.52+(1-warmth)*0.08);
   dustMat.uniforms.uColor.value.setRGB(0.9+warmth*0.1, 0.75+warmth*0.13, 0.50+(1-warmth)*0.20);
 
   // ── STARS ──
   starMat.uniforms.uTime.value = time;
-  starMat.uniforms.uOpacity.value = Math.pow(1-warmth,1.5)*0.40;
+  starMat.uniforms.uOpacity.value = Math.pow(1-warmth,1.5)*0.55;
 
   // ── GOD RAYS ──
-  const rayOp = warmth*0.3+0.05;
+  const rayOp = warmth*0.40+0.08;
   for(const rm of rayMeshes){rm.material.opacity=rayOp;rm.rotation.z=Math.sin(time*0.05+rm.position.x*0.01)*0.03;}
   rayGroup.rotation.y = skySphere.rotation.y;
 
