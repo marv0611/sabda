@@ -675,7 +675,7 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
 
   // ── BREATHING + COLOUR ──
   const b = br(time), hue = (time/CCYCLE)%1;
-  colT.setHSL(hue,0.58,0.50); colC.lerp(colT,0.005);
+  colT.setHSL(hue,0.65,0.40); colC.lerp(colT,0.005);
   // Fix 5: Colour lerp reset near loop boundary (v11 — exponential convergence)
   const colLoopT = time % 1800;
   if (colLoopT > 1790) {
@@ -688,8 +688,8 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
   hemi.color.setRGB(0.77*tR,0.50*tG,0.25*tB);
   hemi.groundColor.setRGB(0.10*tB,0.15*tG,0.12*tR);
   rim.color.setRGB(0.25*tB,0.31*tG,0.50*tR);
-  renderer.toneMappingExposure = 0.92+b*0.18;
-  hemi.intensity = 0.38+b*0.10;
+  renderer.toneMappingExposure = 0.75+b*0.12;
+  hemi.intensity = 0.28+b*0.08;
 
   // ── SKY WARMTH ──
   const skyPhase = (time/1800)*Math.PI*2;
@@ -697,10 +697,10 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
   const warmth = Math.pow(warmthRaw, 2.0);  // squash toward 0 = Belfast dominates ~70%
   skySphereMat.uniforms.mixVal.value = 1.0 - warmth;  // warmth=1 → sky A (evening), warmth=0 → sky B (belfast)
   skySphereMat.uniforms.tintColor.value.setRGB(0.85+warmth*0.15, 0.82+warmth*0.10, 0.88+(1-warmth)*0.12);
-  sun.intensity = 0.55+warmth*0.50+b*0.12;
+  sun.intensity = 0.40+warmth*0.35+b*0.08;
   sun.color.setRGB(tR*(0.8+warmth*0.2), 0.56*tG*(0.6+warmth*0.4), 0.31*tB*(0.7+warmth*0.3));
-  ambient.intensity = 0.34+warmth*0.12+b*0.08;
-  contentScene.fog.color.setRGB(0.55+warmth*0.10, 0.43+warmth*0.05, 0.52+(1-warmth)*0.08);
+  ambient.intensity = 0.22+warmth*0.10+b*0.06;
+  contentScene.fog.color.setRGB(0.38+warmth*0.08, 0.30+warmth*0.04, 0.38+(1-warmth)*0.06);
   dustMat.uniforms.uColor.value.setRGB(0.9+warmth*0.1, 0.75+warmth*0.13, 0.50+(1-warmth)*0.20);
 
   // ── STARS ──
