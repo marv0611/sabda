@@ -972,7 +972,7 @@ function animate() {
     const camDir = head.clone().normalize();
     const velPerp = velDir.clone().sub(camDir.clone().multiplyScalar(velDir.dot(camDir)));
     const perpSpeed = velPerp.length();
-    const tailLen = 180 + perpSpeed * 120;
+    const tailLen = 300 + perpSpeed * 150;
     const tail = head.clone().sub(velDir.clone().multiplyScalar(tailLen));
     const side = velDir.clone().cross(camDir);
     if (side.lengthSq() < 0.001) side.set(0, 1, 0);

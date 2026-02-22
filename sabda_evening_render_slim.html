@@ -756,8 +756,8 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     // Tail length scales with how much the meteor moves across your view (not toward you)
     const camDir = head.clone().normalize();
     const velPerp = velDir.clone().sub(camDir.clone().multiplyScalar(velDir.dot(camDir)));
-    const perpSpeed = velPerp.length();  // 0 = moving toward camera, 1 = moving across view
-    const tailLen = 180 + perpSpeed * 120;  // 180-300 — always substantial, longer when crossing view
+    const perpSpeed = velPerp.length();
+    const tailLen = 300 + perpSpeed * 150;  // 300-450 — always long, even head-on
     const tail = head.clone().sub(velDir.clone().multiplyScalar(tailLen));
     // Build camera-facing quad
     const side = velDir.clone().cross(camDir);
