@@ -719,6 +719,9 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     const loopT = time % 1800;
     if (ss.timer <= 0 && loopT > 2 && loopT < 1785) {
       ss.active = true;
+      // 50/50 mix: half are modest streaks, half are big wall-crossers
+      const isGiant = Math.random() > 0.5;
+      ss.tailBonus = isGiant ? 200 + Math.random() * 400 : Math.random() * 50;
       ss.maxLife = isGiant ? 4.0 + Math.random() * 2.0 : 2.0 + Math.random() * 1.0;
       ss.life = ss.maxLife;
       // Spawn in upper sky
@@ -736,9 +739,6 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
         -Math.sin(entryAngle) * speed,
         Math.sin(travelTheta) * Math.cos(entryAngle) * speed
       );
-      // 50/50 mix: half are modest streaks, half are big wall-crossers
-      const isGiant = Math.random() > 0.5;
-      ss.tailBonus = isGiant ? 200 + Math.random() * 400 : Math.random() * 50;  // giants: 200-600, normal: 0-50
       ssStreak.visible = true;
     }
   }
