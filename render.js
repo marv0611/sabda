@@ -101,6 +101,15 @@ async function main() {
   });
 
   console.log('Loading scene...');
+  
+  // Capture page console and errors
+  page.on('console', msg => {
+    if (msg.type() === 'error' || msg.text().includes('SABDA')) {
+      console.log(`  [PAGE] ${msg.text()}`);
+    }
+  });
+  page.on('pageerror', err => console.log(`  [PAGE ERROR] ${err.message}`));
+  
   await page.goto(`file://${HTML_FILE}`, { waitUntil: 'domcontentloaded', timeout: 120000 });
 
   // Wait for all assets (sky textures, birds, planets, saturn) to load
