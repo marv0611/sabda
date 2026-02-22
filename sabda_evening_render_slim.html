@@ -742,14 +742,13 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     const exitY = 55;
     let inBoundary = false;
     if (birdLoopT > 1790) {
-      // Last 10s: smoothstep climb from homeY to exitY
       inBoundary = true;
       const p = (birdLoopT - 1790) / 10;
       const ss = p * p * (3 - 2 * p);
+      const prevY = bd.ctr.position.y;
       bd.ctr.position.y = bd.homeY + (exitY - bd.homeY) * ss;
-      bd.vy = 0;
+      bd.vy = (bd.ctr.position.y - prevY) / dt;  // derive vy for pitch
     } else if (birdLoopT < 10) {
-      // First 10s: smoothstep descend from exitY to homeY
       inBoundary = true;
       if (birdLoopT < 0.1) {
         bd.ctr.position.set(Math.cos(bd._initAngle)*bd.homeDist, exitY, Math.sin(bd._initAngle)*bd.homeDist);
@@ -758,8 +757,9 @@ window.SABDA_RENDER_FRAME = function(simTime) {
       }
       const p = birdLoopT / 10;
       const ss = p * p * (3 - 2 * p);
+      const prevY = bd.ctr.position.y;
       bd.ctr.position.y = exitY + (bd.homeY - exitY) * ss;
-      bd.vy = 0;
+      bd.vy = (bd.ctr.position.y - prevY) / dt;  // derive vy for pitch
     }
     bd.ctr.scale.setScalar(1);
     bd.ctr.visible = true;
