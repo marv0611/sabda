@@ -11,7 +11,7 @@ const fs = require('fs');
 //       "full"    = real-time 30-minute render (change below)
 // ═══════════════════════════════════════════════════════════════
 
-const MODE = 'preview';   // 'preview' or 'full'
+const MODE = 'full';   // 'preview' or 'full'
 
 const CONFIG = MODE === 'preview' ? {
   fps: 30,
