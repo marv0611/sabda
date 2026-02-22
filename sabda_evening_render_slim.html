@@ -180,9 +180,8 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         col.rgb = min(col.rgb, 0.85 + (col.rgb - 0.85) * 0.3);
 
         // 4. Gentle vignette on vertical edges — helps blend zones
-        float edgeFade = smoothstep(0.0, 0.03, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
         float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
-        col.rgb *= edgeFade * topBottomFade * 0.05 + 0.95;
+        col.rgb *= topBottomFade * 0.05 + 0.95;
 
         col.rgb += dither(gl_FragCoord.xy) / 255.0;
         gl_FragColor = col;
