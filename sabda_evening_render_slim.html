@@ -404,13 +404,38 @@ contentScene.add(rayGroup);
 const shootingStarState = {
   active: false, timer: 8,
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, maxLife: 0,
+  prevPos: new THREE.Vector3(),
 };
-const ssHeadMat = new THREE.MeshBasicMaterial({ color: 0xfff8e0, fog: false, toneMapped: false });
-const ssHead = new THREE.Mesh(new THREE.SphereGeometry(5, 8, 8), ssHeadMat);
-ssHead.visible = false; contentScene.add(ssHead);
-const ssTailMat = new THREE.MeshBasicMaterial({ color: 0xffe0a0, fog: false, transparent: true, opacity: 0.7, toneMapped: false });
-const ssTail = new THREE.Mesh(new THREE.CylinderGeometry(0.0, 3.5, 1.0, 8, 1), ssTailMat);
-ssTail.visible = false; contentScene.add(ssTail);
+// Shooting star = thin stretched quad (bright streak line)
+const ssGeo = new THREE.PlaneGeometry(1, 1);
+const ssMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+  uniforms: {
+    uOpacity: { value: 1.0 },
+    uColor: { value: new THREE.Color(1, 0.98, 0.9) },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform float uOpacity;
+    uniform vec3 uColor;
+    varying vec2 vUv;
+    void main() {
+      // Bright head at uv.y=1, fading tail toward uv.y=0
+      float headGlow = pow(vUv.y, 2.0);
+      // Thin center line, fades at edges
+      float centerLine = 1.0 - abs(vUv.x - 0.5) * 2.0;
+      centerLine = pow(centerLine, 3.0);
+      float alpha = headGlow * centerLine * uOpacity;
+      gl_FragColor = vec4(uColor, alpha);
+    }
+  `,
+});
+const ssStreak = new THREE.Mesh(ssGeo, ssMat);
+ssStreak.visible = false; contentScene.add(ssStreak);
 
 // ── DUST PARTICLES ──
 const DUST_COUNT = 250;
@@ -538,7 +563,7 @@ loader.load(birdsUrl, gltf => {
     const mixer=new THREE.AnimationMixer(clone), bts=0.4+fi*0.06;
     const action=mixer.clipAction(clip); action.timeScale=bts; action.play();
     birdFlocks.push({ctr,mixer,action,heading:fc.angle+Math.PI/2+(Math.random()-0.5)*0.3,
-      _initAngle:fc.angle,
+      _initAngle:fc.angle, _fadeOffset: fi * 1.3,
       cruiseSpeed:0.015+Math.random()*0.008,vy:0,homeY:fc.y,homeDist:fc.dist,
       turnRate:0,desiredTurnRate:(Math.random()-0.5)*0.015,turnChangeTimer:10+Math.random()*15,
       isGliding:false,glideTimer:3+Math.random()*4,glideDuration:1.5+Math.random()*2.0,
@@ -680,43 +705,66 @@ window.SABDA_RENDER_FRAME = function(simTime) {
   for(const rm of rayMeshes){rm.material.opacity=rayOp;rm.rotation.z=Math.sin(time*0.05+rm.position.x*0.01)*0.03;}
   rayGroup.rotation.y = skySphere.rotation.y;
 
-  // ── SHOOTING STAR (suppressed near loop boundary) ──
+  // ── SHOOTING STAR (streak line, steep diagonal, ~30s interval) ──
   const ss = shootingStarState;
   if (!ss.active) {
     ss.timer -= dt;
     const loopT = time % 1800;
     if (ss.timer <= 0 && loopT > 2 && loopT < 1785) {
       ss.active = true;
-      ss.maxLife = 1.2 + Math.random() * 0.6;
+      ss.maxLife = 0.8 + Math.random() * 0.7;  // 0.8-1.5s like real meteors
       ss.life = ss.maxLife;
+      // Spawn in upper sky
       const sTheta = Math.random() * Math.PI * 2;
-      const sElev = (25 + Math.random() * 35) * Math.PI / 180;
+      const sElev = (35 + Math.random() * 30) * Math.PI / 180;
       const sR = 340;
       ss.pos.set(Math.cos(sElev)*Math.cos(sTheta)*sR, Math.sin(sElev)*sR, Math.cos(sElev)*Math.sin(sTheta)*sR);
-      const speed = 180 + Math.random() * 100;
-      const vTheta = sTheta + (Math.random() > 0.5 ? 1 : -1) * (0.7 + Math.random() * 0.8);
-      const downFrac = 0.08 + Math.random() * 0.12;
-      ss.vel.set(Math.cos(vTheta)*speed, -speed*downFrac, Math.sin(vTheta)*speed);
-      ssHead.visible = true; ssTail.visible = true;
+      ss.prevPos.copy(ss.pos);
+      // Steep downward diagonal: 60-80° from horizontal
+      const entryAngle = (60 + Math.random() * 20) * Math.PI / 180;
+      const travelTheta = sTheta + (Math.random() - 0.5) * 0.6;
+      const speed = 250 + Math.random() * 150;
+      ss.vel.set(
+        Math.cos(travelTheta) * Math.cos(entryAngle) * speed,
+        -Math.sin(entryAngle) * speed,
+        Math.sin(travelTheta) * Math.cos(entryAngle) * speed
+      );
+      ssStreak.visible = true;
     }
   }
   if (ss.active) {
     ss.life -= dt;
-    const progress = 1 - ss.life / ss.maxLife;
-    const opacity = progress < 0.06 ? progress / 0.06 : Math.pow(Math.max(0, 1 - progress), 1.6);
+    const progress = 1 - ss.life / ss.maxLife;  // 0→1
+    // Brightness: quick fade in, sustain, fade out
+    let opacity;
+    if (progress < 0.1) opacity = progress / 0.1;
+    else if (progress < 0.7) opacity = 1.0;
+    else opacity = (1 - progress) / 0.3;
+    opacity = Math.max(0, opacity);
+    // Move
+    ss.prevPos.copy(ss.pos);
     ss.pos.addScaledVector(ss.vel, dt);
-    ssHead.position.copy(ss.pos); ssHead.scale.setScalar(opacity);
-    const tailLen = Math.min(progress * ss.maxLife, 0.5) * ss.vel.length() * opacity * 1.8;
-    if (tailLen > 0.1) {
-      const velNorm = ss.vel.clone().normalize();
-      ssTail.position.copy(ss.pos).sub(velNorm.multiplyScalar(tailLen * 0.5));
-      ssTail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), ss.vel.clone().normalize());
-      ssTail.scale.set(opacity, tailLen, opacity);
-    }
-    ssTailMat.opacity = opacity * 0.6;
-    ssHeadMat.color.setRGB(1, 0.97 - progress * 0.1, 0.88 - progress * 0.2);
-    if (ss.life <= 0) { ss.active = false; ssHead.visible = false; ssTail.visible = false; ss.timer = 25 + Math.random() * 10; }
+    // Position streak: center between head and tail
+    const tailLen = 35 + 25 * Math.min(1, progress * 3);  // grows then holds
+    const velDir = ss.vel.clone().normalize();
+    const tailEnd = ss.pos.clone().sub(velDir.clone().multiplyScalar(tailLen));
+    const mid = ss.pos.clone().add(tailEnd).multiplyScalar(0.5);
+    ssStreak.position.copy(mid);
+    // Orient quad to face camera and align with velocity
+    const streakWidth = 3;
+    ssStreak.scale.set(streakWidth, tailLen, 1);
+    ssStreak.lookAt(0, 0, 0);  // face camera at origin
+    // Rotate to align Y-axis with velocity direction in screen space
+    const up = new THREE.Vector3(0, 1, 0);
+    const velLocal = velDir.clone().applyQuaternion(ssStreak.quaternion.clone().invert());
+    const angle = Math.atan2(velLocal.x, velLocal.y);
+    ssStreak.rotateZ(-angle);
+    // Update material
+    ssMat.uniforms.uOpacity.value = opacity;
+    ssMat.uniforms.uColor.value.setRGB(1, 1 - progress * 0.12, 0.92 - progress * 0.2);
+    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 25 + Math.random() * 10; }
   }
+
 
   // ── PLANETS ──
   planetGroup.rotation.y = (time / 1800) * Math.PI * 2 * 2; saturnGroup.rotation.y = (time / 1800) * Math.PI * 2 * 1; saturnMainGroup.rotation.y = (time / 1800) * Math.PI * 2 * 1;
@@ -737,39 +785,30 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     if(dist<10){const aa=Math.atan2(pz,px);let ad=aa-bd.heading;while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;btb=ad*0.01;}
     bd.turnRate+=(bd.desiredTurnRate+btb-bd.turnRate)*0.4*dt;bd.turnRate=Math.max(-0.03,Math.min(0.03,bd.turnRate));
     bd.heading+=bd.turnRate*dt;bd.ctr.position.x+=Math.sin(bd.heading)*bd.cruiseSpeed;bd.ctr.position.z+=Math.cos(bd.heading)*bd.cruiseSpeed;
-    // Fix 3: Bird loop boundary — smoothstep fly out above / in from above
+    // Fix 3: Bird loop boundary — staggered fade out/in (each bird offset by _fadeOffset)
     const birdLoopT = time % 1800;
-    const exitY = 55;
-    let inBoundary = false;
-    if (birdLoopT > 1790) {
-      inBoundary = true;
-      const p = (birdLoopT - 1790) / 10;
-      const ss = p * p * (3 - 2 * p);
-      const prevY = bd.ctr.position.y;
-      bd.ctr.position.y = bd.homeY + (exitY - bd.homeY) * ss;
-      bd.vy = (bd.ctr.position.y - prevY) / dt;  // derive vy for pitch
-    } else if (birdLoopT < 10) {
-      inBoundary = true;
-      if (birdLoopT < 0.1) {
-        bd.ctr.position.set(Math.cos(bd._initAngle)*bd.homeDist, exitY, Math.sin(bd._initAngle)*bd.homeDist);
+    const fadeDur = 4;  // each bird fades over 4s
+    const totalWindow = 10;  // full window covers 10s
+    // Fade out: bird starts fading at (1800 - totalWindow + _fadeOffset)
+    const fadeOutStart = 1800 - totalWindow + bd._fadeOffset;
+    // Fade in: bird starts appearing at (0 + _fadeOffset)
+    const fadeInStart = bd._fadeOffset;
+    let birdFade = 1;
+    if (birdLoopT > fadeOutStart) {
+      birdFade = Math.max(0, 1 - (birdLoopT - fadeOutStart) / fadeDur);
+    } else if (birdLoopT < fadeInStart + fadeDur) {
+      if (birdLoopT < 0.1 + bd._fadeOffset && birdLoopT >= bd._fadeOffset) {
+        bd.ctr.position.set(Math.cos(bd._initAngle)*bd.homeDist, bd.homeY, Math.sin(bd._initAngle)*bd.homeDist);
         bd.heading = bd._initAngle + Math.PI / 2;
         bd.vy = 0; bd.turnRate = 0;
       }
-      const p = birdLoopT / 10;
-      const ss = p * p * (3 - 2 * p);
-      const prevY = bd.ctr.position.y;
-      bd.ctr.position.y = exitY + (bd.homeY - exitY) * ss;
-      bd.vy = (bd.ctr.position.y - prevY) / dt;  // derive vy for pitch
+      birdFade = birdLoopT < fadeInStart ? 0 : Math.min(1, (birdLoopT - fadeInStart) / fadeDur);
     }
-    bd.ctr.scale.setScalar(1);
-    bd.ctr.visible = true;
-    if (!inBoundary) {
-      const alt=bd.homeY+(bd.isGliding?-0.6:0.4);
-      bd.vy+=(alt-bd.ctr.position.y)*0.03*dt;
-      bd.vy*=0.96;bd.ctr.position.y+=bd.vy;
-      if(bd.ctr.position.y<2.5){bd.ctr.position.y=2.5;bd.vy=Math.max(bd.vy,0);}
-      if(bd.ctr.position.y>7.0){bd.ctr.position.y=7.0;bd.vy=Math.min(bd.vy,0);}
-    }
+    bd.ctr.scale.setScalar(birdFade > 0.01 ? birdFade : 0.001);
+    bd.ctr.visible = birdFade > 0.01;
+    const alt=bd.homeY+(bd.isGliding?-0.6:0.4);bd.vy+=(alt-bd.ctr.position.y)*0.03*dt;bd.vy*=0.96;bd.ctr.position.y+=bd.vy;
+    if(bd.ctr.position.y<2.5){bd.ctr.position.y=2.5;bd.vy=Math.max(bd.vy,0);}
+    if(bd.ctr.position.y>7.0){bd.ctr.position.y=7.0;bd.vy=Math.min(bd.vy,0);}
     if(dist>45){const a=Math.atan2(pz,px)+Math.PI;bd.ctr.position.x=Math.cos(a)*bd.homeDist;bd.ctr.position.z=Math.sin(a)*bd.homeDist;bd.heading=a;}
     bd.bankAngle+=(-bd.turnRate*5-bd.bankAngle)*1.5*dt;bd.ctr.rotation.z=bd.bankAngle;
     bd.pitchAngle+=(-bd.vy*2.5-bd.pitchAngle)*1.5*dt;bd.ctr.rotation.x=bd.pitchAngle;bd.ctr.rotation.y=bd.heading;
