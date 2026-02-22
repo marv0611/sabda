@@ -163,22 +163,23 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         vec3 dir = vec3(sin(azimuth) * ce, sin(elevation), -cos(azimuth) * ce);
         vec4 col = textureCube(tCube, dir);
 
-        // ── PROJECTION OPTIMIZATION ──
+        // ── PROJECTION OPTIMIZATION (gentle) ──
 
-        // 1. Black floor lift — prevents dark patches in projector overlap zones
-        col.rgb = col.rgb * 0.94 + 0.03;
+        // 1. Black floor lift — subtle, prevents dark patches in overlap zones
+        col.rgb = col.rgb * 0.97 + 0.015;
 
-        // 2. S-curve contrast — richer midtones, counteracts projector haze
-        col.rgb = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
+        // 2. Mild contrast boost — blend between linear and S-curve (50% strength)
+        vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
+        col.rgb = mix(col.rgb, scurve, 0.4);
 
-        // 3. Saturation boost — projectors wash out color, compensate here
+        // 3. Gentle saturation boost — 12% to compensate for projector washout
         float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
-        col.rgb = mix(vec3(luma), col.rgb, 1.25);
+        col.rgb = mix(vec3(luma), col.rgb, 1.12);
 
         // 4. Gentle vignette on vertical edges — helps blend zones
-        float edgeFade = smoothstep(0.0, 0.04, vUv.x) * smoothstep(1.0, 0.96, vUv.x);
-        float topBottomFade = smoothstep(0.0, 0.03, vUv.y) * smoothstep(1.0, 0.97, vUv.y);
-        col.rgb *= edgeFade * topBottomFade * 0.08 + 0.92;
+        float edgeFade = smoothstep(0.0, 0.03, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
+        float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
+        col.rgb *= edgeFade * topBottomFade * 0.05 + 0.95;
 
         col.rgb += dither(gl_FragCoord.xy) / 255.0;
         gl_FragColor = col;
@@ -328,11 +329,6 @@ const skySphereMat = new THREE.ShaderMaterial({
       vec4 a = texture2D(texA, vUv);
       vec4 b = texture2D(texB, vUv);
       vec3 col = mix(a.rgb, b.rgb, mixVal) * tintColor;
-      // Projection optimization: S-curve contrast for richer sky
-      col = col * col * (3.0 - 2.0 * col);
-      // Saturation boost
-      float luma = dot(col, vec3(0.299, 0.587, 0.114));
-      col = mix(vec3(luma), col, 1.3);
       col += dither(gl_FragCoord.xy) / 255.0;
       gl_FragColor = vec4(col, 1.0);
     }
@@ -711,8 +707,8 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
   hemi.color.setRGB(0.77*tR,0.50*tG,0.25*tB);
   hemi.groundColor.setRGB(0.10*tB,0.15*tG,0.12*tR);
   rim.color.setRGB(0.25*tB,0.31*tG,0.50*tR);
-  renderer.toneMappingExposure = 0.75+b*0.12;
-  hemi.intensity = 0.28+b*0.08;
+  renderer.toneMappingExposure = 0.82+b*0.14;
+  hemi.intensity = 0.32+b*0.08;
 
   // ── SKY WARMTH ──
   const skyPhase = (time/1800)*Math.PI*2;
@@ -720,10 +716,10 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
   const warmth = Math.pow(warmthRaw, 2.0);  // squash toward 0 = Belfast dominates ~70%
   skySphereMat.uniforms.mixVal.value = 1.0 - warmth;  // warmth=1 → sky A (evening), warmth=0 → sky B (belfast)
   skySphereMat.uniforms.tintColor.value.setRGB(0.85+warmth*0.15, 0.82+warmth*0.10, 0.88+(1-warmth)*0.12);
-  sun.intensity = 0.40+warmth*0.35+b*0.08;
+  sun.intensity = 0.45+warmth*0.40+b*0.10;
   sun.color.setRGB(tR*(0.8+warmth*0.2), 0.56*tG*(0.6+warmth*0.4), 0.31*tB*(0.7+warmth*0.3));
-  ambient.intensity = 0.22+warmth*0.10+b*0.06;
-  contentScene.fog.color.setRGB(0.38+warmth*0.08, 0.30+warmth*0.04, 0.38+(1-warmth)*0.06);
+  ambient.intensity = 0.28+warmth*0.10+b*0.06;
+  contentScene.fog.color.setRGB(0.45+warmth*0.08, 0.36+warmth*0.04, 0.44+(1-warmth)*0.06);
   dustMat.uniforms.uColor.value.setRGB(0.9+warmth*0.1, 0.75+warmth*0.13, 0.50+(1-warmth)*0.20);
 
   // ── STARS ──
