@@ -557,7 +557,7 @@ loader.load(b64ToUrl('planetdata','model/gltf-binary'), gltf => {
     else{c.material=new THREE.MeshPhysicalMaterial({map:oMap,normalMap:oNorm,roughness:0.45,metalness:0.05,emissive:new THREE.Color(0x6633aa),emissiveIntensity:0.25,clearcoat:0.12,clearcoatRoughness:0.4});}
   }}});
   planetGroup.add(model);
-  if(gltf.animations&&gltf.animations.length>0){planetMixer=new THREE.AnimationMixer(model);const a=planetMixer.clipAction(gltf.animations[0]);a.timeScale=0.15;a.play();}
+  if(gltf.animations&&gltf.animations.length>0){planetMixer=new THREE.AnimationMixer(model);const a=planetMixer.clipAction(gltf.animations[0]);a.timeScale=1;a.play();}
   checkReady();
 });
 
@@ -720,7 +720,7 @@ window.SABDA_RENDER_FRAME = function(simTime) {
 
   // ── PLANETS ──
   planetGroup.rotation.y = (time / 1800) * Math.PI * 2 * 2; saturnGroup.rotation.y = (time / 1800) * Math.PI * 2 * 1; saturnMainGroup.rotation.y = (time / 1800) * Math.PI * 2 * 1;
-  if(planetMixer){const clipDur=planetMixer._actions&&planetMixer._actions[0]?planetMixer._actions[0].getClip().duration:1;const nCycles=Math.max(1,Math.round(1800*0.15/clipDur));const adjSpeed=nCycles*clipDur/1800;planetMixer.setTime((time*adjSpeed)%clipDur);}
+  if(planetMixer){const clip=planetMixer._actions&&planetMixer._actions[0]?planetMixer._actions[0].getClip():null;if(clip){const cd=clip.duration;const totalAnimTime=1800*0.15;const nC=Math.max(1,Math.round(totalAnimTime/cd));const loopAnimTime=nC*cd;planetMixer.setTime(((time%1800)/1800)*loopAnimTime);}}
   if(glowMat)glowMat.opacity=0.50+b*0.15;
 
   // ── BIRDS ──
