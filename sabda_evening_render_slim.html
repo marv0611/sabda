@@ -821,8 +821,8 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     bd.ctr.position.y=Math.max(2.0, Math.min(7.5, bd.ctr.position.y));
     // Clamp vy to prevent runaway velocity
     bd.vy = Math.max(-0.15, Math.min(0.15, bd.vy));
-    // Soft distance limit — steer back gradually instead of teleporting
-    if(dist>35){const a=Math.atan2(-pz,-px);let hd2=a-bd.heading;while(hd2>Math.PI)hd2-=Math.PI*2;while(hd2<-Math.PI)hd2+=Math.PI*2;bd.heading+=hd2*0.02*dt*30;}
+    // Distance boundary — if bird drifts too far, flip heading inward
+    if(dist>40){bd.heading=Math.atan2(-pz,-px)+((Math.random()-0.5)*0.5);bd.ctr.position.x=Math.cos(bd.heading+Math.PI)*38;bd.ctr.position.z=Math.sin(bd.heading+Math.PI)*38;}
     bd.bankAngle+=(-bd.turnRate*5-bd.bankAngle)*1.5*dt;bd.ctr.rotation.z=bd.bankAngle;
     bd.pitchAngle+=(-bd.vy*2.5-bd.pitchAngle)*1.5*dt;bd.ctr.rotation.x=bd.pitchAngle;bd.ctr.rotation.y=bd.heading;
     }
