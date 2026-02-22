@@ -572,8 +572,8 @@ loader.load(birdsUrl, gltf => {
       _initAngle:fc.angle, _fadeOffset: fi * 1.3,
       cruiseSpeed:0.015+Math.random()*0.008,vy:0,homeY:fc.y,homeDist:fc.dist,
       turnRate:0,desiredTurnRate:(Math.random()-0.5)*0.015,turnChangeTimer:10+Math.random()*15,
-      isGliding:false,glideTimer:3+Math.random()*4,glideDuration:1.5+Math.random()*2.0,
-      flapDuration:2.0+Math.random()*3.0,targetTimeScale:bts,currentTimeScale:bts,baseTimeScale:bts,
+      isGliding:false,glideTimer:3+Math.random()*4,glideDuration:3.0+Math.random()*4.0,
+      flapDuration:3.0+Math.random()*4.0,targetTimeScale:bts,currentTimeScale:bts,baseTimeScale:bts,
       bankAngle:0,pitchAngle:0});
   }
   checkReady();
@@ -813,9 +813,14 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
   // ── BIRDS ──
   for(const bd of birdFlocks){
     bd.glideTimer-=dt;
-    if(bd.glideTimer<=0){bd.isGliding=!bd.isGliding;bd.glideTimer=bd.isGliding?bd.glideDuration+Math.random()*0.5:bd.flapDuration+Math.random()*2;
-      bd.targetTimeScale=bd.isGliding?0.35:bd.baseTimeScale+Math.random()*0.15;}
-    bd.currentTimeScale+=(bd.targetTimeScale-bd.currentTimeScale)*1.5*dt;bd.action.timeScale=Math.min(bd.currentTimeScale, bd.baseTimeScale*2);bd.mixer.update(dt);
+    if(bd.glideTimer<=0){bd.isGliding=!bd.isGliding;
+      bd.glideTimer=bd.isGliding? bd.glideDuration+Math.random()*3.0 : bd.flapDuration+Math.random()*3.0;
+      bd.targetTimeScale=bd.isGliding? 0.15+Math.random()*0.2 : bd.baseTimeScale*0.7+Math.random()*bd.baseTimeScale*0.5;}
+    // Very slow lerp — wings ease in and out like breathing
+    bd.currentTimeScale+=(bd.targetTimeScale-bd.currentTimeScale)*0.4*dt;
+    // Add subtle sinusoidal wave to flap speed — never perfectly constant
+    const flapWave = 1.0 + Math.sin(time * (0.8 + bd._fadeOffset * 0.3)) * 0.12;
+    bd.action.timeScale=Math.min(bd.currentTimeScale * flapWave, bd.baseTimeScale*2);bd.mixer.update(dt);
     bd.turnChangeTimer-=dt;
     if(bd.turnChangeTimer<=0){bd.desiredTurnRate=(Math.random()-0.5)*0.025;if(Math.random()<0.25)bd.desiredTurnRate*=0.15;bd.turnChangeTimer=6+Math.random()*9;}
     const px=bd.ctr.position.x,pz=bd.ctr.position.z,dist=Math.sqrt(px*px+pz*pz);
