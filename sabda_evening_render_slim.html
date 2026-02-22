@@ -737,13 +737,13 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     if(dist<10){const aa=Math.atan2(pz,px);let ad=aa-bd.heading;while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;btb=ad*0.01;}
     bd.turnRate+=(bd.desiredTurnRate+btb-bd.turnRate)*0.4*dt;bd.turnRate=Math.max(-0.03,Math.min(0.03,bd.turnRate));
     bd.heading+=bd.turnRate*dt;bd.ctr.position.x+=Math.sin(bd.heading)*bd.cruiseSpeed;bd.ctr.position.z+=Math.cos(bd.heading)*bd.cruiseSpeed;
-    // Fix 3: Bird loop boundary — fade out last 5s, reset at t=0, fade in first 5s
+    // Fix 3: Bird loop boundary — fade out last 8s, reset at t=0, fade in first 8s
     const birdLoopT = time % 1800;
     let birdFade = 1;
-    if (birdLoopT > 1795) {
-      birdFade = (1800 - birdLoopT) / 5; // 1→0 over last 5s
-    } else if (birdLoopT < 5) {
-      birdFade = birdLoopT / 5; // 0→1 over first 5s
+    if (birdLoopT > 1792) {
+      birdFade = (1800 - birdLoopT) / 8; // 1→0 over last 8s
+    } else if (birdLoopT < 8) {
+      birdFade = birdLoopT / 8; // 0→1 over first 8s
       // Reset to spawn during fade-in
       if (birdLoopT < 0.1) {
         bd.ctr.position.set(Math.cos(bd._initAngle)*bd.homeDist, bd.homeY, Math.sin(bd._initAngle)*bd.homeDist);
