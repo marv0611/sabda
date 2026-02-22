@@ -162,6 +162,24 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         float ce = cos(elevation);
         vec3 dir = vec3(sin(azimuth) * ce, sin(elevation), -cos(azimuth) * ce);
         vec4 col = textureCube(tCube, dir);
+
+        // ── PROJECTION OPTIMIZATION ──
+
+        // 1. Black floor lift — prevents dark patches in projector overlap zones
+        col.rgb = col.rgb * 0.94 + 0.03;
+
+        // 2. S-curve contrast — richer midtones, counteracts projector haze
+        col.rgb = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
+
+        // 3. Saturation boost — projectors wash out color, compensate here
+        float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+        col.rgb = mix(vec3(luma), col.rgb, 1.25);
+
+        // 4. Gentle vignette on vertical edges — helps blend zones
+        float edgeFade = smoothstep(0.0, 0.04, vUv.x) * smoothstep(1.0, 0.96, vUv.x);
+        float topBottomFade = smoothstep(0.0, 0.03, vUv.y) * smoothstep(1.0, 0.97, vUv.y);
+        col.rgb *= edgeFade * topBottomFade * 0.08 + 0.92;
+
         col.rgb += dither(gl_FragCoord.xy) / 255.0;
         gl_FragColor = col;
       }
@@ -310,6 +328,11 @@ const skySphereMat = new THREE.ShaderMaterial({
       vec4 a = texture2D(texA, vUv);
       vec4 b = texture2D(texB, vUv);
       vec3 col = mix(a.rgb, b.rgb, mixVal) * tintColor;
+      // Projection optimization: S-curve contrast for richer sky
+      col = col * col * (3.0 - 2.0 * col);
+      // Saturation boost
+      float luma = dot(col, vec3(0.299, 0.587, 0.114));
+      col = mix(vec3(luma), col, 1.3);
       col += dither(gl_FragCoord.xy) / 255.0;
       gl_FragColor = vec4(col, 1.0);
     }
