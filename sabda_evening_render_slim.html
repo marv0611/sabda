@@ -809,35 +809,10 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     if(dist<10){const aa=Math.atan2(pz,px);let ad=aa-bd.heading;while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;btb=ad*0.01;}
     bd.turnRate+=(bd.desiredTurnRate+btb-bd.turnRate)*0.4*dt;bd.turnRate=Math.max(-0.03,Math.min(0.03,bd.turnRate));
     bd.heading+=bd.turnRate*dt;bd.ctr.position.x+=Math.sin(bd.heading)*bd.cruiseSpeed*dt*30;bd.ctr.position.z+=Math.cos(bd.heading)*bd.cruiseSpeed*dt*30;
-    // Fix 3: Bird loop boundary — staggered fade out/in (each bird offset by _fadeOffset)
-    const birdLoopT = time % 1800;
-    const fadeDur = 8;  // each bird fades over 8s — slow and graceful
-    const totalWindow = 16;  // full window covers 16s
-    // Fade out: bird starts fading at (1800 - totalWindow + _fadeOffset)
-    const fadeOutStart = 1800 - totalWindow + bd._fadeOffset * 1.5;
-    // Fade in: bird starts appearing at (0 + _fadeOffset)
-    const fadeInStart = bd._fadeOffset * 1.5;
-    let birdFade = 1;
-    if (birdLoopT > fadeOutStart) {
-      birdFade = Math.max(0, 1 - (birdLoopT - fadeOutStart) / fadeDur);
-    } else if (birdLoopT < fadeInStart + fadeDur) {
-      birdFade = birdLoopT < fadeInStart ? 0 : Math.min(1, (birdLoopT - fadeInStart) / fadeDur);
-      // While fully invisible, keep resetting position to spawn point
-      if (birdFade < 0.01) {
-        const farDist = bd.homeDist + 25;
-        bd.ctr.position.set(Math.cos(bd._initAngle)*farDist, bd.homeY, Math.sin(bd._initAngle)*farDist);
-        bd.heading = bd._initAngle + Math.PI / 2;
-        bd.vy = 0; bd.turnRate = 0;
-      }
-      // Ease-in curve so growth is barely noticeable at start
-      birdFade = birdFade * birdFade * (3 - 2 * birdFade);  // smoothstep
-    }
-    // Scale from 0.3 to 1.0 instead of 0 to 1 — birds appear small in distance, grow as they approach
-    const fadeScale = 0.3 + birdFade * 0.7;
-    bd.ctr.scale.setScalar(birdFade > 0.01 ? fadeScale : 0.001);
-    bd.ctr.visible = birdFade > 0.01;
-    // Only run physics when visible — prevents hidden velocity accumulation
-    if (birdFade > 0.01) {
+    // Bird fade — SIMPLIFIED: always visible, no loop boundary handling for now
+    bd.ctr.scale.setScalar(1);
+    bd.ctr.visible = true;
+    {
     const alt=bd.homeY+(bd.isGliding?-0.3:0.2);bd.vy+=(alt-bd.ctr.position.y)*0.02*dt;bd.vy*=Math.pow(0.96, dt*30);bd.ctr.position.y+=bd.vy;
     // Soft altitude limits — push back gently instead of hard clamp
     if(bd.ctr.position.y<2.8){bd.vy+=(2.8-bd.ctr.position.y)*0.05*dt;}
@@ -850,7 +825,7 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     if(dist>35){const a=Math.atan2(-pz,-px);let hd2=a-bd.heading;while(hd2>Math.PI)hd2-=Math.PI*2;while(hd2<-Math.PI)hd2+=Math.PI*2;bd.heading+=hd2*0.02*dt*30;}
     bd.bankAngle+=(-bd.turnRate*5-bd.bankAngle)*1.5*dt;bd.ctr.rotation.z=bd.bankAngle;
     bd.pitchAngle+=(-bd.vy*2.5-bd.pitchAngle)*1.5*dt;bd.ctr.rotation.x=bd.pitchAngle;bd.ctr.rotation.y=bd.heading;
-    } else { bd.vy = 0; bd.bankAngle = 0; bd.pitchAngle = 0; }
+    }
   }
 
   // ── RENDER 4 WALLS ──
