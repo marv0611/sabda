@@ -867,7 +867,10 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     // Distance boundary — if bird drifts too far, flip heading inward
     // Distance boundary handled above in steering section
     bd.bankAngle+=(-bd.turnRate*5-bd.bankAngle)*1.5*dt;bd.ctr.rotation.z=bd.bankAngle;
-    bd.pitchAngle+=(-bd.vy*2.5-bd.pitchAngle)*1.5*dt;bd.ctr.rotation.x=bd.pitchAngle;bd.ctr.rotation.y=bd.heading;
+    bd.pitchAngle+=(-bd.vy*2.5-bd.pitchAngle)*1.5*dt;bd.ctr.rotation.x=bd.pitchAngle;
+    // Close birds face forward (flip 180°), far birds keep backward (looks fine at distance)
+    const flipBlend = Math.min(1, Math.max(0, (dist - 22) / 6));  // 0 at dist≤22 (close=flipped), 1 at dist≥28 (far=normal)
+    bd.ctr.rotation.y = bd.heading + Math.PI * (1 - flipBlend);  // +PI when close, +0 when far
     }
   }
 
