@@ -168,17 +168,16 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         // 1. Black floor lift — subtle, prevents dark patches in overlap zones
         col.rgb = col.rgb * 0.97 + 0.015;
 
-        // 2. Moderate contrast boost — 60% S-curve blend
+        // 2. Moderate contrast boost — 50% S-curve blend
         vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
-        col.rgb = mix(col.rgb, scurve, 0.55);
+        col.rgb = mix(col.rgb, scurve, 0.45);
 
         // 3. Saturation boost — 18% 
         float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
         col.rgb = mix(vec3(luma), col.rgb, 1.18);
 
-        // 4. Highlight rolloff — prevent blinding white patches
-        col.rgb = min(col.rgb, vec3(0.92));
-        col.rgb = mix(col.rgb, smoothstep(0.0, 1.0, col.rgb), 0.15);
+        // 4. Highlight rolloff — soft shoulder prevents blinding whites
+        col.rgb = vec3(1.0) - exp(-col.rgb * 2.8);  // filmic shoulder: whites compress to ~0.91 max
 
         // 4. Gentle vignette on vertical edges — helps blend zones
         float edgeFade = smoothstep(0.0, 0.03, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
