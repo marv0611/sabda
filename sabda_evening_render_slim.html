@@ -791,6 +791,21 @@ window.SABDA_RENDER_FRAME = function(simTime) {
 
 // Signal ready
 
+// ── LIVE PREVIEW (browser only, skipped by Puppeteer) ──
+if (!window.__SABDA_PUPPETEER__) {
+  let liveT = 0;
+  function liveLoop() {
+    liveT += 1/30;
+    window.SABDA_RENDER_FRAME(liveT);
+    // Blit 4 walls to screen
+    renderer.setRenderTarget(null);
+    renderer.render(compScene, compCam);
+    requestAnimationFrame(liveLoop);
+  }
+  document.getElementById('loading').classList.add('done');
+  requestAnimationFrame(liveLoop);
+}
+
 
 </script>
 </body>
