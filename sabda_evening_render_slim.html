@@ -402,7 +402,7 @@ contentScene.add(rayGroup);
 
 // ── SHOOTING STAR ──
 const shootingStarState = {
-  active: false, timer: 8,
+  active: false, timer: 1,
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, maxLife: 0,
   prevPos: new THREE.Vector3(),
 };
@@ -709,25 +709,26 @@ window.SABDA_RENDER_FRAME = function(simTime) {
   for(const rm of rayMeshes){rm.material.opacity=rayOp;rm.rotation.z=Math.sin(time*0.05+rm.position.x*0.01)*0.03;}
   rayGroup.rotation.y = skySphere.rotation.y;
 
-  // ── SHOOTING STAR (streak line, steep diagonal, ~30s interval) ──
+  // ── SHOOTING STAR (shallow sweeping streak) ──
   const ss = shootingStarState;
   if (!ss.active) {
     ss.timer -= dt;
     const loopT = time % 1800;
     if (ss.timer <= 0 && loopT > 2 && loopT < 1785) {
       ss.active = true;
-      ss.maxLife = 1.0 + Math.random() * 0.8;  // 1.0-1.8s
+      ss.maxLife = 1.8 + Math.random() * 1.0;  // 1.8-2.8s — long enough to register
       ss.life = ss.maxLife;
       // Spawn in upper sky
       const sTheta = Math.random() * Math.PI * 2;
-      const sElev = (35 + Math.random() * 30) * Math.PI / 180;
+      const sElev = (30 + Math.random() * 25) * Math.PI / 180;
       const sR = 340;
       ss.pos.set(Math.cos(sElev)*Math.cos(sTheta)*sR, Math.sin(sElev)*sR, Math.cos(sElev)*Math.sin(sTheta)*sR);
       ss.prevPos.copy(ss.pos);
-      // Very shallow diagonal entry: 10-25° from horizontal
-      const entryAngle = (10 + Math.random() * 15) * Math.PI / 180;
-      const travelTheta = sTheta + (Math.random() - 0.5) * 0.6;
-      const speed = 250 + Math.random() * 150;
+      // Very shallow entry: 5-12° from horizontal — like real meteors
+      const entryAngle = (5 + Math.random() * 7) * Math.PI / 180;
+      // Consistent travel direction: always sweep "forward" from spawn point
+      const travelTheta = sTheta + 0.3 + Math.random() * 0.3;
+      const speed = 350 + Math.random() * 150;
       ss.vel.set(
         Math.cos(travelTheta) * Math.cos(entryAngle) * speed,
         -Math.sin(entryAngle) * speed,
@@ -739,23 +740,23 @@ window.SABDA_RENDER_FRAME = function(simTime) {
   if (ss.active) {
     ss.life -= dt;
     const progress = 1 - ss.life / ss.maxLife;  // 0→1
-    // Brightness: quick fade in, sustain, fade out
+    // Brightness: quick fade in, sustain, long graceful fade out
     let opacity;
-    if (progress < 0.1) opacity = progress / 0.1;
-    else if (progress < 0.7) opacity = 1.0;
-    else opacity = (1 - progress) / 0.3;
+    if (progress < 0.08) opacity = progress / 0.08;
+    else if (progress < 0.5) opacity = 1.0;
+    else opacity = (1 - progress) / 0.5;
     opacity = Math.max(0, opacity);
     // Move
     ss.prevPos.copy(ss.pos);
     ss.pos.addScaledVector(ss.vel, dt);
     // Position streak: center between head and tail
-    const tailLen = 120 + 60 * Math.min(1, progress * 3);  // grows then holds (120-180)
+    const tailLen = 250 + 120 * Math.min(1, progress * 3);  // 250-370 — long dramatic sweep
     const velDir = ss.vel.clone().normalize();
     const tailEnd = ss.pos.clone().sub(velDir.clone().multiplyScalar(tailLen));
     const mid = ss.pos.clone().add(tailEnd).multiplyScalar(0.5);
     ssStreak.position.copy(mid);
     // Orient quad to face camera and align with velocity
-    const streakWidth = 6;
+    const streakWidth = 8;
     ssStreak.scale.set(streakWidth, tailLen, 1);
     ssStreak.lookAt(0, 0, 0);  // face camera at origin
     // Rotate to align Y-axis with velocity direction in screen space
@@ -766,7 +767,7 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     // Update material
     ssMat.uniforms.uOpacity.value = opacity;
     ssMat.uniforms.uColor.value.setRGB(1, 1 - progress * 0.12, 0.92 - progress * 0.2);
-    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 25 + Math.random() * 10; }
+    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 2 + Math.random() * 2; }
   }
 
 
