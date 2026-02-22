@@ -176,6 +176,10 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
         col.rgb = mix(vec3(luma), col.rgb, 1.18);
 
+        // 4. Highlight rolloff — prevent blinding white patches
+        col.rgb = min(col.rgb, vec3(0.92));
+        col.rgb = mix(col.rgb, smoothstep(0.0, 1.0, col.rgb), 0.15);
+
         // 4. Gentle vignette on vertical edges — helps blend zones
         float edgeFade = smoothstep(0.0, 0.03, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
         float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
