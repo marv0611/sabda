@@ -402,7 +402,7 @@ contentScene.add(rayGroup);
 
 // ── SHOOTING STAR ──
 const shootingStarState = {
-  active: false, timer: 8,
+  active: false, timer: 1,
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, maxLife: 0,
 };
 // Shooting star = 2-triangle quad, vertices updated each frame in world space
@@ -786,7 +786,7 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     // Material
     ssMat.uniforms.uOpacity.value = opacity;
     ssMat.uniforms.uColor.value.setRGB(1, 0.97 - progress * 0.05, 0.92 - progress * 0.1);
-    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 8 + Math.random() * 4; }
+    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 1.5 + Math.random() * 1; }
   }
 
 
