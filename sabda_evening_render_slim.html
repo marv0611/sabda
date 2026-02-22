@@ -726,7 +726,6 @@ window.SABDA_RENDER_FRAME = function(simTime) {
       const sElev = (30 + Math.random() * 25) * Math.PI / 180;
       const sR = 340;
       ss.pos.set(Math.cos(sElev)*Math.cos(sTheta)*sR, Math.sin(sElev)*sR, Math.cos(sElev)*Math.sin(sTheta)*sR);
-      ss.prevPos.copy(ss.pos);
       // Very shallow entry: 5-12° from horizontal — like real meteors
       const entryAngle = (5 + Math.random() * 7) * Math.PI / 180;
       // Consistent travel direction: always sweep "forward" from spawn point
@@ -757,7 +756,9 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     const tail = ss.pos.clone().sub(velDir.clone().multiplyScalar(220));
     // Build camera-facing quad: width perpendicular to both velocity and camera direction
     const camDir = head.clone().normalize(); // camera is at origin
-    const side = velDir.clone().cross(camDir).normalize();
+    const side = velDir.clone().cross(camDir);
+    if (side.lengthSq() < 0.001) side.set(0, 1, 0); // fallback if parallel
+    side.normalize();
     const hw = 1.2; // half-width — thin ethereal line
     // 6 vertices: 2 triangles forming a quad from tail to head
     const p = ssGeo.attributes.position.array;
