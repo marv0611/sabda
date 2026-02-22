@@ -13,12 +13,12 @@ const fs = require('fs');
 
 const CONFIG = {
   fps: 30,
-  outputDuration: 30,    // 30 seconds total
+  outputDuration: 60,    // 60 seconds total
   canvasW: 6928,
   canvasH: 2400,
   // Scene time ranges:
-  // Frames 0-449:   t = 1785 → 1800 (last 15s of loop)
-  // Frames 450-899: t = 0 → 15 (first 15s of loop)
+  // Frames 0-899:    t = 1770 → 1800 (last 30s of loop — full homing window)
+  // Frames 900-1799: t = 0 → 30 (first 30s of loop — full homing window)
 };
 
 const totalFrames = CONFIG.fps * CONFIG.outputDuration;
@@ -26,11 +26,11 @@ const halfFrames = totalFrames / 2;
 
 function simTimeForFrame(frame) {
   if (frame < halfFrames) {
-    // Last 15 seconds of the loop
-    return 1785 + (frame / halfFrames) * 15;
+    // Last 30 seconds of the loop
+    return 1770 + (frame / halfFrames) * 30;
   } else {
-    // First 15 seconds of the loop
-    return ((frame - halfFrames) / halfFrames) * 15;
+    // First 30 seconds of the loop
+    return ((frame - halfFrames) / halfFrames) * 30;
   }
 }
 
@@ -38,7 +38,7 @@ async function main() {
   console.log('═══════════════════════════════════════════════');
   console.log('  SABDA Loop Check Renderer');
   console.log(`  Output: ${CONFIG.outputDuration}s (${totalFrames} frames @ ${CONFIG.fps}fps)`);
-  console.log('  t=1785→1800 then t=0→15 (loop point at 15s mark)');
+  console.log('  t=1770→1800 then t=0→30 (loop point at 30s mark)');
   console.log('═══════════════════════════════════════════════');
 
   try { execSync('ffmpeg -version', { stdio: 'ignore' }); }
@@ -190,7 +190,7 @@ async function main() {
 
   const totalTime = (Date.now()-startTime)/60000;
   console.log(`\n  ✅ Loop check done! ${totalTime.toFixed(1)} minutes`);
-  console.log('  Loop point is at the 15-second mark of each video.');
+  console.log('  Loop point is at the 30-second mark of each video.');
   console.log('  Watch for any visual discontinuity at that moment.');
 }
 
