@@ -716,7 +716,7 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     const loopT = time % 1800;
     if (ss.timer <= 0 && loopT > 2 && loopT < 1785) {
       ss.active = true;
-      ss.maxLife = 1.8 + Math.random() * 1.0;  // 1.8-2.8s — long enough to register
+      ss.maxLife = 1.2 + Math.random() * 0.6;  // 1.2-1.8s — quick and clean
       ss.life = ss.maxLife;
       // Spawn in upper sky
       const sTheta = Math.random() * Math.PI * 2;
@@ -740,33 +740,32 @@ window.SABDA_RENDER_FRAME = function(simTime) {
   if (ss.active) {
     ss.life -= dt;
     const progress = 1 - ss.life / ss.maxLife;  // 0→1
-    // Brightness: quick fade in, sustain, long graceful fade out
+    // Brightness: instant on, sustain, gentle fade out at end
     let opacity;
-    if (progress < 0.08) opacity = progress / 0.08;
-    else if (progress < 0.5) opacity = 1.0;
-    else opacity = (1 - progress) / 0.5;
+    if (progress < 0.05) opacity = progress / 0.05;
+    else if (progress < 0.6) opacity = 1.0;
+    else opacity = Math.pow((1 - progress) / 0.4, 0.7);  // gentle power curve fadeout
     opacity = Math.max(0, opacity);
-    // Move
+    // Move head forward
     ss.prevPos.copy(ss.pos);
     ss.pos.addScaledVector(ss.vel, dt);
-    // Position streak: center between head and tail
-    const tailLen = 250 + 120 * Math.min(1, progress * 3);  // 250-370 — long dramatic sweep
+    // Fixed tail length — no growing, no retract
+    const tailLen = 180;
     const velDir = ss.vel.clone().normalize();
-    const tailEnd = ss.pos.clone().sub(velDir.clone().multiplyScalar(tailLen));
-    const mid = ss.pos.clone().add(tailEnd).multiplyScalar(0.5);
-    ssStreak.position.copy(mid);
-    // Orient quad to face camera and align with velocity
-    const streakWidth = 8;
+    // Anchor quad so head is at top (uv.y=1) — offset position BACK by half tail
+    const anchor = ss.pos.clone().sub(velDir.clone().multiplyScalar(tailLen * 0.5));
+    ssStreak.position.copy(anchor);
+    // Thin ethereal streak
+    const streakWidth = 2.5;
     ssStreak.scale.set(streakWidth, tailLen, 1);
-    ssStreak.lookAt(0, 0, 0);  // face camera at origin
-    // Rotate to align Y-axis with velocity direction in screen space
-    const up = new THREE.Vector3(0, 1, 0);
+    ssStreak.lookAt(0, 0, 0);
+    // Rotate to align with velocity direction in screen space
     const velLocal = velDir.clone().applyQuaternion(ssStreak.quaternion.clone().invert());
     const angle = Math.atan2(velLocal.x, velLocal.y);
     ssStreak.rotateZ(-angle);
-    // Update material
+    // Update material — warm white fading to cool
     ssMat.uniforms.uOpacity.value = opacity;
-    ssMat.uniforms.uColor.value.setRGB(1, 1 - progress * 0.12, 0.92 - progress * 0.2);
+    ssMat.uniforms.uColor.value.setRGB(1, 0.97 - progress * 0.05, 0.92 - progress * 0.1);
     if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 2 + Math.random() * 2; }
   }
 
