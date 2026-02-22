@@ -737,27 +737,27 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     if(dist<10){const aa=Math.atan2(pz,px);let ad=aa-bd.heading;while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;btb=ad*0.01;}
     bd.turnRate+=(bd.desiredTurnRate+btb-bd.turnRate)*0.4*dt;bd.turnRate=Math.max(-0.03,Math.min(0.03,bd.turnRate));
     bd.heading+=bd.turnRate*dt;bd.ctr.position.x+=Math.sin(bd.heading)*bd.cruiseSpeed;bd.ctr.position.z+=Math.cos(bd.heading)*bd.cruiseSpeed;
-    // Fix 3: Bird homing near loop boundary (v11 — exponential curve)
-    // Gentle for first ~25s, accelerates smoothly in last ~5s, guarantees exact match at boundary.
+    // Fix 3: Bird homing near loop boundary (v11.1 — time-absolute blend)
+    // Last 30s: birds smoothly converge to spawn. At t=1800/0: exact spawn position.
     const birdLoopT = time % 1800;
-    const birdResetBlend = birdLoopT < 30 ? 1 - birdLoopT / 30 : birdLoopT > 1770 ? (birdLoopT - 1770) / 30 : 0;
+    const birdResetBlend = birdLoopT > 1770 ? (birdLoopT - 1770) / 30 : birdLoopT < 30 ? 1 - birdLoopT / 30 : 0;
     if (birdResetBlend > 0) {
-      const eased = birdResetBlend * birdResetBlend * birdResetBlend; // cubic easing — nearly zero until last ~5s
-      const cx = bd.ctr.position.x, cz = bd.ctr.position.z;
-      const curDist = Math.sqrt(cx * cx + cz * cz);
-      // Target spawn position
+      const eased = birdResetBlend * birdResetBlend * (3 - 2 * birdResetBlend); // smoothstep
       const spawnX = Math.cos(bd._initAngle) * bd.homeDist;
       const spawnZ = Math.sin(bd._initAngle) * bd.homeDist;
       const spawnHeading = bd._initAngle + Math.PI / 2;
-      // Blend position toward spawn (cubic eased)
-      bd.ctr.position.x += (spawnX - cx) * eased * 0.08;
-      bd.ctr.position.z += (spawnZ - cz) * eased * 0.08;
-      bd.ctr.position.y += (bd.homeY - bd.ctr.position.y) * eased * 0.08;
-      // Blend heading toward spawn heading
+      // Time-absolute lerp: at eased=1 (boundary), position IS spawn
+      const cx = bd.ctr.position.x, cz = bd.ctr.position.z;
+      bd.ctr.position.x = cx + (spawnX - cx) * eased;
+      bd.ctr.position.z = cz + (spawnZ - cz) * eased;
+      bd.ctr.position.y += (bd.homeY - bd.ctr.position.y) * eased;
+      // Blend heading
       let headDiff = spawnHeading - bd.heading;
       while (headDiff > Math.PI) headDiff -= Math.PI * 2;
       while (headDiff < -Math.PI) headDiff += Math.PI * 2;
-      bd.heading += headDiff * eased * 0.08;
+      bd.heading += headDiff * eased;
+      // Kill vertical velocity
+      bd.vy *= (1 - eased);
       // Kill vertical velocity near boundary
       bd.vy *= (1 - eased);
     }
