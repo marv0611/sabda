@@ -1423,7 +1423,7 @@ Building on all v7 lessons (1-30), v8 adds lessons 31-42, v9 adds lessons 43-49,
 
 52. **(v10) Large HTML files (50MB+) must NEVER be uploaded as chat chunks.** Uploading 51MB of HTML chunks into a Claude chat alongside project files (1300+ lines of manual) immediately exhausts the context window, triggering compaction before the agent can even begin work. The solution is GitHub: store HTML files in a private repo (`github.com/marv0611/sabda`), clone via `git clone` at session start. This puts the file on disk without using any context. github.com is in the allowed network domains. raw.githubusercontent.com is blocked, so always use full `git clone`, not curl.
 
-### v11 Additions: Render Architecture, Loop Check, Bird Fix
+### v11 Additions: Render Architecture, Loop Check, Bird Fix, Context Optimization
 
 53. **(v11) Render-only HTML is a separate file from the interactive viewer.** The render pipeline uses a dedicated lean HTML (~740 lines) with `antialias: false`, `UnsignedByteType`, no bloom, no orbit controls, no room scene, no strip RT, no MSAA. It exposes `SABDA_RENDER_FRAME` with all scene update logic inline. Never try to bolt render hooks onto the interactive viewer HTML — it's 10-25× slower due to the strip RT, MSAA, bloom, and rAF loop overhead. These are two separate files serving different purposes: the interactive viewer (antialias, bloom, MSAA, orbit controls, room scene) is for browser preview; the render HTML (antialias false, UnsignedByteType, no bloom, no room, direct per-wall equirect) is for Puppeteer rendering. Any attempt to unify them with URL parameters or mode flags creates the exact 25× slowdown that was debugged for 3 hours.
 
@@ -1438,6 +1438,8 @@ Building on all v7 lessons (1-30), v8 adds lessons 31-42, v9 adds lessons 43-49,
 58. **(v11) Loopcheck only shows homing time — behaviour looks worse than reality.** The loopcheck renders t=1770→1800 + t=0→30, which is 100% inside the homing zone. Any issues with homing (circular orbits, unnatural steering) are maximally visible in loopcheck output. In the actual 30-minute video, homing only runs for 60 seconds out of 1800 (3.3% of total time). If birds look slightly constrained in loopcheck but not visibly circular, that's acceptable.
 
 59. **(v11) Chrome launch args matter for render performance.** The Puppeteer renderer uses `--use-gl=angle` and `--enable-webgl` with `--ignore-gpu-blocklist` for GPU access. The viewport size is set to 6928×2400 (the composite output resolution). These args are critical — without `--use-gl=angle`, Chrome may fall back to software rendering, which is orders of magnitude slower.
+
+60. **(v11) Context window management is a production constraint.** The Claude Project File loads into EVERY message. A bloated project file (4K+ tokens of tables) + pasted conversation transcripts + full manual reads = conversation dies after 3-4 messages. Fix: slim project file (~800 tokens), no transcript pasting (use Claude's past-chat search tools), targeted manual section reads only. See Section 23.
 
 ---
 
@@ -1512,6 +1514,118 @@ The next Claude session clones and gets the latest version automatically.
 - `raw.githubusercontent.com` is blocked — individual file downloads via curl won't work. Always use `git clone`.
 - The repo is private — if auth is needed, provide a personal access token in the clone URL: `git clone https://TOKEN@github.com/marv0611/sabda.git`
 - GitHub has a 100MB file size limit. SABDA HTMLs at 48-52MB are well within this.
+
+---
+
+## 23. Context Optimization Protocol (v11)
+
+### The Problem
+
+Claude conversations have a finite context window. Every token counts. The SABDA project is large — 75KB manual, 50MB HTML files, detailed parameter tables. If the project file (loaded on EVERY message) is bloated, conversations die after 3-4 exchanges.
+
+### What Eats Context (Ranked)
+
+1. **Pasted conversation transcripts** — BIGGEST killer. A single paste from a prior chat can be 30-40% of the budget. Claude has `conversation_search` and `recent_chats` tools — use those instead.
+2. **Project file size** — Loaded into every single message. The old reference file was ~4K tokens of tables already in the manual. Trimmed to ~800 tokens in v2.
+3. **Full manual reads** — `view` on the entire 75KB manual dumps it into context. Only read needed sections.
+4. **Tool output echoing** — Git clone output, file listings, command results all accumulate. Summarize, don't echo.
+5. **Long Claude responses** — Previous responses stay in context. Concise answers = more room for later messages.
+
+### Rules for the User
+
+- **Never paste transcripts from previous conversations.** Say "continue from [topic]" or "pick up where SKY9 left off" — Claude can search past chats.
+- **Keep instructions concise.** Claude has memory of the project + can search past chats for details.
+- **If hitting conversation limits:** Start a new chat. Don't try to push through — quality degrades as context fills.
+- **One task per conversation** when possible. Don't overload a single chat with multiple unrelated changes.
+
+### Rules for Claude
+
+- Clone repo once at session start.
+- Do NOT `view` the full manual. Read only the specific sections needed for the current task.
+- Check memory first — don't re-read sections you already know.
+- Minimize tool output in responses. Summarize results, don't echo raw output.
+- Keep responses focused and concise. Avoid repeating what the user already knows.
+
+### Lesson
+
+> **Lesson 60: Context window management is a production constraint.** Treat it like render budget — every token has a cost. Slim project file + targeted manual reads + no transcript pasting = 3-4× longer conversations.
+
+---
+
+## 24. Archived Reference Data (Moved from Project File v1)
+
+The following data was previously in the Claude Project File. It was moved here to save context tokens. All of this information also exists in the relevant manual sections above — this is kept as a consolidated quick-reference.
+
+### Build Parameters Summary (v10)
+
+| Parameter | Desktop | Mobile |
+|-----------|---------|--------|
+| CubeCamera | 4096 | 1024 |
+| CubeCamera format | HalfFloatType | HalfFloatType |
+| Strip width | 12288 | 4096 |
+| MSAA | 8× | 4× |
+| Equirect shader | With dithering | With dithering |
+
+Sky: 8192×4096 PNG. Warmth tint: R 0.85–1.00, G 0.82–0.92, B 0.88–1.00.
+
+Animation cycles: Breathing 14s, Colour hue 90s, Sky warmth 1800s, Sky rotation 1800s.
+
+Floor: MeshStandardMaterial #787878, roughness 0.75, metalness 0.05. Hemisphere + ambient only.
+
+Fog: Content 0.003, Room 0.025. Bloom: 0.15 strength, 0.6 radius, 0.85 threshold.
+
+Shooting stars: First 45-75s, interval 50-75s, duration 0.7-1.1s. Suppressed near loop boundaries.
+
+### Video Pipeline Summary
+
+Output: Two 6928×1200 H.264 MP4s. CRF 14. 30 FPS. Preview mode: 30×, 1800 frames, ~7 min. Full: 1×, 54000 frames, ~3.3 hrs.
+
+Wall targets: Left/Right 5008×1200, Front/Back 1920×1200. NO MSAA, UnsignedByteType.
+
+Watchout: sabda_top.mp4 at X=92 Y=40, sabda_bottom.mp4 at X=92 Y=1506.
+
+### Loop Continuity Fixes (6 total)
+
+1. Planet rotations — time-absolute
+2. Shooting star suppression — last 15s / first 2s
+3. Bird homing — radial nudge toward spawn (last/first 30s)
+4. Bird initial angle — `_initAngle` saved at spawn
+5. Dust particle homing — last/first 20s
+6. Colour lerp reset — cubic convergence last 10s
+
+### Top 10 Lessons
+
+1. MSAA render targets return black via readPixels
+2. PNG for sky, never JPEG
+3. HalfFloatType on CubeCamera prevents banding
+4. Warmth tint minimum ≥ 0.85 R, ≥ 0.82 G
+5. Visually inspect every build
+6. CubeCamera must match sky resolution
+7. No floor PointLights
+8. Preview mode before full render
+9. CRF 14 not 18
+10. GitHub clone instead of chat uploads
+
+### Two Delivery Pipelines
+
+Pipeline A: Unity → NDI → Watchout (complex scenes, heavy VFX)
+Pipeline B: Three.js HTML → Chromium → Watchout (portable single-file, backup content)
+
+### Wall Layout
+
+```
+        Wall A (short, 5.63m)
+        ┌─────────────────────┐
+        │                     │
+Wall B  │                     │  Wall D
+(long,  │                     │  (long,
+15m)    │                     │  15m)
+        │                     │
+        └─────────────────────┘
+        Wall C (short, 5.63m)
+```
+
+Wall B = planet side. Wall D = Saturn side.
 
 ---
 
