@@ -824,7 +824,7 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
       if (birdLoopT < 0.1 + bd._fadeOffset * 1.5 && birdLoopT >= bd._fadeOffset * 1.5) {
         // Start bird far away so it glides in from distance
         const farDist = bd.homeDist + 25;
-        bd.ctr.position.set(Math.cos(bd._initAngle)*farDist, bd.homeY + 3, Math.sin(bd._initAngle)*farDist);
+        bd.ctr.position.set(Math.cos(bd._initAngle)*farDist, bd.homeY, Math.sin(bd._initAngle)*farDist);
         bd.heading = bd._initAngle + Math.PI / 2;
         bd.vy = 0; bd.turnRate = 0;
       }
@@ -836,12 +836,21 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
     const fadeScale = 0.3 + birdFade * 0.7;
     bd.ctr.scale.setScalar(birdFade > 0.01 ? fadeScale : 0.001);
     bd.ctr.visible = birdFade > 0.01;
-    const alt=bd.homeY+(bd.isGliding?-0.6:0.4);bd.vy+=(alt-bd.ctr.position.y)*0.03*dt;bd.vy*=0.96;bd.ctr.position.y+=bd.vy;
-    if(bd.ctr.position.y<2.5){bd.ctr.position.y=2.5;bd.vy=Math.max(bd.vy,0);}
-    if(bd.ctr.position.y>7.0){bd.ctr.position.y=7.0;bd.vy=Math.min(bd.vy,0);}
-    if(dist>45){const a=Math.atan2(pz,px)+Math.PI;bd.ctr.position.x=Math.cos(a)*bd.homeDist;bd.ctr.position.z=Math.sin(a)*bd.homeDist;bd.heading=a;}
+    // Only run physics when visible — prevents hidden velocity accumulation
+    if (birdFade > 0.01) {
+    const alt=bd.homeY+(bd.isGliding?-0.3:0.2);bd.vy+=(alt-bd.ctr.position.y)*0.02*dt;bd.vy*=Math.pow(0.96, dt*30);bd.ctr.position.y+=bd.vy;
+    // Soft altitude limits — push back gently instead of hard clamp
+    if(bd.ctr.position.y<2.8){bd.vy+=(2.8-bd.ctr.position.y)*0.05*dt;}
+    if(bd.ctr.position.y>6.5){bd.vy-=(bd.ctr.position.y-6.5)*0.05*dt;}
+    // Safety backstop — should never fire, but prevents any edge case
+    bd.ctr.position.y=Math.max(2.0, Math.min(7.5, bd.ctr.position.y));
+    // Clamp vy to prevent runaway velocity
+    bd.vy = Math.max(-0.15, Math.min(0.15, bd.vy));
+    // Soft distance limit — steer back gradually instead of teleporting
+    if(dist>35){const a=Math.atan2(-pz,-px);let hd2=a-bd.heading;while(hd2>Math.PI)hd2-=Math.PI*2;while(hd2<-Math.PI)hd2+=Math.PI*2;bd.heading+=hd2*0.02*dt*30;}
     bd.bankAngle+=(-bd.turnRate*5-bd.bankAngle)*1.5*dt;bd.ctr.rotation.z=bd.bankAngle;
     bd.pitchAngle+=(-bd.vy*2.5-bd.pitchAngle)*1.5*dt;bd.ctr.rotation.x=bd.pitchAngle;bd.ctr.rotation.y=bd.heading;
+    } else { bd.vy = 0; bd.bankAngle = 0; bd.pitchAngle = 0; }
   }
 
   // ── RENDER 4 WALLS ──
