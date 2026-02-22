@@ -11,9 +11,15 @@ const fs = require('fs');
 //       "full"    = real-time 30-minute render (change below)
 // ═══════════════════════════════════════════════════════════════
 
-const MODE = 'preview';   // 'preview' or 'full'
+const MODE = process.argv[2] === 'full' ? 'full' : process.argv[2] === 'test' ? 'test' : 'preview';
 
-const CONFIG = MODE === 'preview' ? {
+const CONFIG = MODE === 'test' ? {
+  fps: 30,
+  outputDuration: 1,       // just a few frames
+  sceneDuration: 30,
+  canvasW: 6928,
+  canvasH: 2400,
+} : MODE === 'preview' ? {
   fps: 30,
   outputDuration: 60,     // 1-minute output video
   sceneDuration: 1800,    // covers full 30 minutes of scene time
@@ -72,7 +78,7 @@ async function main() {
   console.log('\n  Launching Chrome...');
   const browser = await puppeteer.launch({
     headless: 'new',
-    args: ['--disable-gpu-sandbox', '--use-gl=angle', '--enable-webgl',
+    args: ['--disable-gpu-sandbox', '--enable-webgl',
       '--ignore-gpu-blocklist', '--disable-web-security', '--allow-file-access-from-files'],
   });
 
@@ -91,8 +97,10 @@ async function main() {
   console.log('  ✓ Scene ready');
 
   await page.evaluate(() => {
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('fps').style.display = 'none';
+    const el = document.getElementById('loading');
+    if (el) el.style.display = 'none';
+    const fp = document.getElementById('fps');
+    if (fp) fp.style.display = 'none';
   });
 
   // Pre-create reusable canvases
