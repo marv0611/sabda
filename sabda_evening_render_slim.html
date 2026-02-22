@@ -637,8 +637,8 @@ window.SABDA_WALLS = {
 };
 
 // Manual frame render function (replaces requestAnimationFrame loop)
-window.SABDA_RENDER_FRAME = function(simTime) {
-  const dt = 1/30; // fixed timestep
+window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
+  const dt = (1/30) * (speedMultiplier || 1); // respects timelapse
   time = simTime;
   
   // ── SKY DRIFT ──
@@ -904,7 +904,7 @@ if (!window.__SABDA_PUPPETEER__) {
     const mix = 1.0 - warmth;
     info.textContent = `${mins}:${secs.toString().padStart(2,'0')} / 30:00  ${timeScale>1?'⚡'+timeScale+'x  ':''}warmth=${warmth.toFixed(2)}  mix=${mix.toFixed(2)} (${mix<0.1?'Evening':mix>0.9?'Belfast':'blend'})`;
 
-    window.SABDA_RENDER_FRAME(liveT);
+    window.SABDA_RENDER_FRAME(liveT, timeScale);
     renderer.setRenderTarget(null);
     renderer.render(compScene, compCam);
     requestAnimationFrame(liveLoop);
