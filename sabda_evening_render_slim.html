@@ -402,7 +402,7 @@ contentScene.add(rayGroup);
 
 // ── SHOOTING STAR ──
 const shootingStarState = {
-  active: false, timer: 1,
+  active: false, timer: 8,
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, maxLife: 0,
 };
 // Shooting star = 2-triangle quad, vertices updated each frame in world space
@@ -786,7 +786,7 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     // Material
     ssMat.uniforms.uOpacity.value = opacity;
     ssMat.uniforms.uColor.value.setRGB(1, 0.97 - progress * 0.05, 0.92 - progress * 0.1);
-    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 2 + Math.random() * 2; }
+    if (ss.life <= 0) { ss.active = false; ssStreak.visible = false; ss.timer = 25 + Math.random() * 10; }
   }
 
 
@@ -811,24 +811,30 @@ window.SABDA_RENDER_FRAME = function(simTime) {
     bd.heading+=bd.turnRate*dt;bd.ctr.position.x+=Math.sin(bd.heading)*bd.cruiseSpeed;bd.ctr.position.z+=Math.cos(bd.heading)*bd.cruiseSpeed;
     // Fix 3: Bird loop boundary — staggered fade out/in (each bird offset by _fadeOffset)
     const birdLoopT = time % 1800;
-    const fadeDur = 4;  // each bird fades over 4s
-    const totalWindow = 10;  // full window covers 10s
+    const fadeDur = 8;  // each bird fades over 8s — slow and graceful
+    const totalWindow = 16;  // full window covers 16s
     // Fade out: bird starts fading at (1800 - totalWindow + _fadeOffset)
-    const fadeOutStart = 1800 - totalWindow + bd._fadeOffset;
+    const fadeOutStart = 1800 - totalWindow + bd._fadeOffset * 1.5;
     // Fade in: bird starts appearing at (0 + _fadeOffset)
-    const fadeInStart = bd._fadeOffset;
+    const fadeInStart = bd._fadeOffset * 1.5;
     let birdFade = 1;
     if (birdLoopT > fadeOutStart) {
       birdFade = Math.max(0, 1 - (birdLoopT - fadeOutStart) / fadeDur);
     } else if (birdLoopT < fadeInStart + fadeDur) {
-      if (birdLoopT < 0.1 + bd._fadeOffset && birdLoopT >= bd._fadeOffset) {
-        bd.ctr.position.set(Math.cos(bd._initAngle)*bd.homeDist, bd.homeY, Math.sin(bd._initAngle)*bd.homeDist);
+      if (birdLoopT < 0.1 + bd._fadeOffset * 1.5 && birdLoopT >= bd._fadeOffset * 1.5) {
+        // Start bird far away so it glides in from distance
+        const farDist = bd.homeDist + 25;
+        bd.ctr.position.set(Math.cos(bd._initAngle)*farDist, bd.homeY + 3, Math.sin(bd._initAngle)*farDist);
         bd.heading = bd._initAngle + Math.PI / 2;
         bd.vy = 0; bd.turnRate = 0;
       }
       birdFade = birdLoopT < fadeInStart ? 0 : Math.min(1, (birdLoopT - fadeInStart) / fadeDur);
+      // Ease-in curve so growth is barely noticeable at start
+      birdFade = birdFade * birdFade * (3 - 2 * birdFade);  // smoothstep
     }
-    bd.ctr.scale.setScalar(birdFade > 0.01 ? birdFade : 0.001);
+    // Scale from 0.3 to 1.0 instead of 0 to 1 — birds appear small in distance, grow as they approach
+    const fadeScale = 0.3 + birdFade * 0.7;
+    bd.ctr.scale.setScalar(birdFade > 0.01 ? fadeScale : 0.001);
     bd.ctr.visible = birdFade > 0.01;
     const alt=bd.homeY+(bd.isGliding?-0.6:0.4);bd.vy+=(alt-bd.ctr.position.y)*0.03*dt;bd.vy*=0.96;bd.ctr.position.y+=bd.vy;
     if(bd.ctr.position.y<2.5){bd.ctr.position.y=2.5;bd.vy=Math.max(bd.vy,0);}
