@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SABDA — 360° Room Viewer (Evening Road)</title>
+<style>
+*{margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#000}
+canvas{position:absolute;top:0;left:0}
+#loading{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;
+  align-items:center;justify-content:center;background:#0e0a0d;z-index:100;
+  font-family:'Georgia',serif;color:#c4a882;font-size:1.2rem;letter-spacing:0.2em;
+  transition:opacity 2s ease-out}
+#loading.done{opacity:0;pointer-events:none}
+#fps{position:fixed;top:8px;left:8px;z-index:50;font-family:monospace;
+  color:rgba(255,255,255,0.5);font-size:11px;background:rgba(0,0,0,0.4);
+  padding:4px 8px;border-radius:4px;pointer-events:none}
+#help{position:fixed;top:8px;right:8px;z-index:50;font-family:monospace;
+  color:rgba(196,168,130,0.6);font-size:11px;background:rgba(0,0,0,0.4);
+  padding:8px 12px;border-radius:4px;pointer-events:none;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="loading">S A B D A — Room Viewer</div>
+<div id="fps"></div>
+<div id="help">Drag to look • Scroll to zoom • T = timelapse • L = labels</div>
+
+<!-- ═══ EMBEDDED ASSETS ═══ -->
+<script id="skydata" type="text/plain">ASSET_PLACEHOLDER</script>
+<script id="skydata_b" type="text/plain">ASSET_PLACEHOLDER</script>
+<script id="birdsdata" type="text/plain">ASSET_PLACEHOLDER</script>
+<script id="planetdata" type="text/plain">ASSET_PLACEHOLDER</script>
+<script id="saturndata" type="text/plain">ASSET_PLACEHOLDER</script>
+
+<script type="importmap">{"imports":{
+  "three":"https://unpkg.com/three@0.162.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.162.0/examples/jsm/"
+}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SABDA 360° Room Viewer — Evening Road v11.5
+   
+   Renders the scene inside a 3D room model with orbit controls.
+   You can look around 360° from inside the room to preview how
+   the projections will look on the actual walls.
+   
+   Room: 15m × 5.63m × 3.23m
+   Floor: matte gray #787878
+   Camera: eye height 1.6m, orbit controls
+   
+   Keyboard:
+     T — toggle 30× timelapse
+     L — toggle wall labels
+     Space — play/pause
+   ═══════════════════════════════════════════════════════════════════════ */
+
+// ── SABDA ROOM GEOMETRY ──
+const ROOM_L = 15.00;   // long walls (Left B / Right D) — along Z axis
+const ROOM_W = 5.63;    // short walls (Front A / Back C) — along X axis
+const ROOM_H = 3.23;    // ceiling height
+const PERIM = 2 * ROOM_L + 2 * ROOM_W;  // 41.26m
+
+const EYE_H = 1.6;
+
+// Azimuth fractions (same as render template)
+const uF = ROOM_W / PERIM;
+const uR = (ROOM_W + ROOM_L) / PERIM;
+const uB = (2 * ROOM_W + ROOM_L) / PERIM;
+
+// Scene-specific constants
+const BREATH = 14, CCYCLE = 90;
+
+
+// ═══════════════════════════════════════════════════════
+// RENDERER
+// ═══════════════════════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  powerPreference: 'high-performance',
+});
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+
+// ═══════════════════════════════════════════════════════
+// CONTENT SCENE (invisible — only rendered to cubemap)
+// ═══════════════════════════════════════════════════════
+const contentScene = new THREE.Scene();
+
+const CUBE_SIZE = 2048; // Lower res for real-time room preview
+const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
+  generateMipmaps: true,
+  minFilter: THREE.LinearMipmapLinearFilter,
+  type: THREE.HalfFloatType,
+});
+const cubeCamera = new THREE.CubeCamera(0.05, 500, cubeRT);
+cubeCamera.position.set(0, EYE_H, 0);
+contentScene.add(cubeCamera);
+
+
+// ═══════════════════════════════════════════════════════
+// ROOM SCENE (visible — what the user sees)
+// ═══════════════════════════════════════════════════════
+const roomScene = new THREE.Scene();
+roomScene.fog = new THREE.FogExp2(0x0a0808, 0.025);
+
+// Room camera with orbit controls
+const roomCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+roomCamera.position.set(0, EYE_H, 0);
+
+const controls = new OrbitControls(roomCamera, renderer.domElement);
+controls.target.set(0, EYE_H, -0.01); // Look slightly forward
+controls.enablePan = false;
+controls.enableZoom = true;
+controls.minDistance = 0.1;
+controls.maxDistance = 6;
+controls.rotateSpeed = 0.5;
+controls.zoomSpeed = 0.8;
+controls.update();
+
+// ── FLOOR ──
+const floorGeo = new THREE.PlaneGeometry(ROOM_W, ROOM_L);
+const floorMat = new THREE.MeshStandardMaterial({
+  color: 0x787878,
+  roughness: 0.75,
+  metalness: 0.05,
+  envMap: cubeRT.texture,
+  envMapIntensity: 0.08,
+});
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.position.set(0, 0, 0);
+roomScene.add(floor);
+
+// ── CEILING (dark, barely visible) ──
+const ceilGeo = new THREE.PlaneGeometry(ROOM_W, ROOM_L);
+const ceilMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
+ceiling.rotation.x = Math.PI / 2;
+ceiling.position.set(0, ROOM_H, 0);
+roomScene.add(ceiling);
+
+// ── WALL PROJECTION SHADER ──
+// Each wall gets a shader that samples the cubemap at the correct azimuth range
+// Same equirect projection as the render template, but applied to wall geometry
+
+const VFOV_RAD = 62.5 * Math.PI / 180.0;
+const ELEV_OFFSET = 3.0 * Math.PI / 180.0;
+
+function makeWallProjectionMat(azStartFrac, azEndFrac) {
+  const azStart = azStartFrac * Math.PI * 2;
+  const azEnd   = azEndFrac * Math.PI * 2;
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      tCube: { value: null },
+      vFovRad: { value: VFOV_RAD },
+      elevOffset: { value: ELEV_OFFSET },
+      azStart: { value: azStart },
+      azRange: { value: azEnd - azStart },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      precision highp float;
+      uniform samplerCube tCube;
+      uniform float vFovRad, elevOffset, azStart, azRange;
+      varying vec2 vUv;
+      float dither(vec2 co) {
+        return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+      }
+      void main() {
+        float azimuth = azStart + vUv.x * azRange;
+        float elevation = (vUv.y - 0.5) * vFovRad + elevOffset;
+        float ce = cos(elevation);
+        vec3 dir = vec3(sin(azimuth) * ce, sin(elevation), -cos(azimuth) * ce);
+        vec4 col = textureCube(tCube, dir);
+
+        // Same projection optimization as render template
+        col.rgb = col.rgb * 0.97 + 0.015;
+        vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
+        col.rgb = mix(col.rgb, scurve, 0.80);
+        float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+        col.rgb = mix(vec3(luma), col.rgb, 1.28);
+        col.rgb = min(col.rgb, 0.85 + (col.rgb - 0.85) * 0.3);
+        float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
+        col.rgb *= topBottomFade * 0.05 + 0.95;
+        col.rgb += dither(gl_FragCoord.xy) / 255.0;
+
+        gl_FragColor = col;
+      }
+    `,
+    side: THREE.FrontSide,
+  });
+}
+
+// Create wall materials
+const matWallFront = makeWallProjectionMat(0.0, uF);   // Wall A (short, front, -Z)
+const matWallRight = makeWallProjectionMat(uF, uR);     // Wall D (long, right, +X)
+const matWallBack  = makeWallProjectionMat(uR, uB);     // Wall C (short, back, +Z)
+const matWallLeft  = makeWallProjectionMat(uB, 1.0);    // Wall B (long, left, -X)
+
+// ── BUILD ROOM WALLS ──
+// Room centred at origin, floor at Y=0, walls from Y=0 to Y=ROOM_H
+// Long walls (B, D) along Z axis (15m), short walls (A, C) along X axis (5.63m)
+
+// Front wall (A) — short, at Z = -ROOM_L/2, facing +Z
+const wallFrontGeo = new THREE.PlaneGeometry(ROOM_W, ROOM_H);
+const wallFront = new THREE.Mesh(wallFrontGeo, matWallFront);
+wallFront.position.set(0, ROOM_H / 2, -ROOM_L / 2);
+roomScene.add(wallFront);
+
+// Right wall (D) — long, at X = +ROOM_W/2, facing -X
+const wallRightGeo = new THREE.PlaneGeometry(ROOM_L, ROOM_H);
+const wallRight = new THREE.Mesh(wallRightGeo, matWallRight);
+wallRight.rotation.y = -Math.PI / 2;
+wallRight.position.set(ROOM_W / 2, ROOM_H / 2, 0);
+roomScene.add(wallRight);
+
+// Back wall (C) — short, at Z = +ROOM_L/2, facing -Z
+const wallBackGeo = new THREE.PlaneGeometry(ROOM_W, ROOM_H);
+const wallBack = new THREE.Mesh(wallBackGeo, matWallBack);
+wallBack.rotation.y = Math.PI;
+wallBack.position.set(0, ROOM_H / 2, ROOM_L / 2);
+roomScene.add(wallBack);
+
+// Left wall (B) — long, at X = -ROOM_W/2, facing +X
+const wallLeftGeo = new THREE.PlaneGeometry(ROOM_L, ROOM_H);
+const wallLeft = new THREE.Mesh(wallLeftGeo, matWallLeft);
+wallLeft.rotation.y = Math.PI / 2;
+wallLeft.position.set(-ROOM_W / 2, ROOM_H / 2, 0);
+roomScene.add(wallLeft);
+
+// ── ROOM LIGHTING (ambient only — walls are emissive via shader) ──
+const roomHemi = new THREE.HemisphereLight(0xc4a882, 0x1a1018, 0.15);
+roomScene.add(roomHemi);
+const roomAmbient = new THREE.AmbientLight(0xffffff, 0.1);
+roomScene.add(roomAmbient);
+
+// ── WALL LABELS (toggle with L key) ──
+const labelGroup = new THREE.Group();
+
+function makeWallLabel(text, position, rotation) {
+  const cvs = document.createElement('canvas');
+  cvs.width = 256; cvs.height = 32;
+  const ctx = cvs.getContext('2d');
+  ctx.font = 'bold 22px monospace';
+  ctx.fillStyle = 'rgba(196, 168, 130, 0.35)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 16);
+  const tex = new THREE.CanvasTexture(cvs);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.2), mat);
+  mesh.position.copy(position);
+  if (rotation) mesh.rotation.y = rotation;
+  return mesh;
+}
+
+labelGroup.add(makeWallLabel('A (Front)', new THREE.Vector3(0, ROOM_H - 0.15, -ROOM_L/2 + 0.01)));
+labelGroup.add(makeWallLabel('D (Right)', new THREE.Vector3(ROOM_W/2 - 0.01, ROOM_H - 0.15, 0), -Math.PI/2));
+labelGroup.add(makeWallLabel('C (Back)',  new THREE.Vector3(0, ROOM_H - 0.15, ROOM_L/2 - 0.01), Math.PI));
+labelGroup.add(makeWallLabel('B (Left)',  new THREE.Vector3(-ROOM_W/2 + 0.01, ROOM_H - 0.15, 0), Math.PI/2));
+
+let showLabels = true;
+roomScene.add(labelGroup);
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'l' || e.key === 'L') {
+    showLabels = !showLabels;
+    labelGroup.visible = showLabels;
+  }
+});
+
+
+// ═══════════════════════════════════════════════════════
+// CONTENT SCENE ELEMENTS (identical to render slim)
+// ═══════════════════════════════════════════════════════
+
+// ── SKY ──
+function b64T(id, m) {
+  const raw = document.getElementById(id)?.textContent?.trim();
+  if (!raw || raw === 'ASSET_PLACEHOLDER') return null;
+  const tex = new THREE.TextureLoader().load('data:image/jpeg;base64,' + raw);
+  if (m) tex.mapping = m;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const skyTexEvening = b64T('skydata', THREE.EquirectangularReflectionMapping);
+const skyTexBelfast = b64T('skydata_b', THREE.EquirectangularReflectionMapping);
+
+const skySphereMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tSkyA: { value: skyTexEvening },
+    tSkyB: { value: skyTexBelfast },
+    warmth: { value: 1.0 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform sampler2D tSkyA;
+    uniform sampler2D tSkyB;
+    uniform float warmth;
+    varying vec2 vUv;
+    void main() {
+      vec4 colA = texture2D(tSkyA, vUv);
+      vec4 colB = texture2D(tSkyB, vUv);
+      gl_FragColor = mix(colB, colA, warmth);
+    }
+  `,
+  side: THREE.BackSide,
+});
+const skySphere = new THREE.Mesh(new THREE.SphereGeometry(200, 64, 32), skySphereMat);
+contentScene.add(skySphere);
+
+// ── LIGHTING ──
+const hemiLight = new THREE.HemisphereLight(0xc4a882, 0x1a1018, 0.7);
+contentScene.add(hemiLight);
+const ambLight = new THREE.AmbientLight(0x9a7a90, 0.3);
+contentScene.add(ambLight);
+
+// ── FOG ──
+contentScene.fog = new THREE.FogExp2(0x9a7a90, 0.003);
+
+// ── STAR FIELD ──
+const starCount = 3000;
+const starGeo = new THREE.BufferGeometry();
+const starPos = new Float32Array(starCount * 3);
+const starSiz = new Float32Array(starCount);
+for (let i = 0; i < starCount; i++) {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  const r = 180;
+  starPos[i*3] = r * Math.sin(phi) * Math.cos(theta);
+  starPos[i*3+1] = Math.abs(r * Math.cos(phi));
+  starPos[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+  starSiz[i] = 1.0 + Math.random() * 2.0;
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+starGeo.setAttribute('size', new THREE.BufferAttribute(starSiz, 1));
+const starMat = new THREE.ShaderMaterial({
+  uniforms: { uOpacity: { value: 0.0 }, uTime: { value: 0 } },
+  vertexShader: `
+    attribute float size;
+    varying float vSize;
+    void main() {
+      vSize = size;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = size * (300.0 / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform float uOpacity, uTime;
+    varying float vSize;
+    void main() {
+      float d = length(gl_PointCoord - 0.5) * 2.0;
+      float alpha = smoothstep(1.0, 0.0, d) * uOpacity;
+      float twinkle = 0.7 + 0.3 * sin(uTime * (1.0 + vSize) + vSize * 10.0);
+      gl_FragColor = vec4(1.0, 0.97, 0.92, alpha * twinkle);
+    }
+  `,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const stars = new THREE.Points(starGeo, starMat);
+contentScene.add(stars);
+
+// ── GOD RAYS ──
+const rayCount = 8;
+const rayGeo = new THREE.BufferGeometry();
+const rayPositions = new Float32Array(rayCount * 6);
+const rayAlphas = new Float32Array(rayCount * 2);
+for (let i = 0; i < rayCount; i++) {
+  const angle = (i / rayCount) * Math.PI * 2 + Math.random() * 0.3;
+  const r1 = 120, r2 = 180;
+  const y1 = 20 + Math.random() * 30;
+  const y2 = 60 + Math.random() * 40;
+  rayPositions[i*6]   = r1 * Math.cos(angle);
+  rayPositions[i*6+1] = y1;
+  rayPositions[i*6+2] = r1 * Math.sin(angle);
+  rayPositions[i*6+3] = r2 * Math.cos(angle);
+  rayPositions[i*6+4] = y2;
+  rayPositions[i*6+5] = r2 * Math.sin(angle);
+  rayAlphas[i*2] = 0.3 + Math.random() * 0.3;
+  rayAlphas[i*2+1] = 0.0;
+}
+rayGeo.setAttribute('position', new THREE.BufferAttribute(rayPositions, 3));
+rayGeo.setAttribute('alpha', new THREE.BufferAttribute(rayAlphas, 1));
+const rayMat = new THREE.ShaderMaterial({
+  uniforms: { uOpacity: { value: 0.0 } },
+  vertexShader: `attribute float alpha; varying float vAlpha;
+    void main() { vAlpha = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `precision highp float; uniform float uOpacity; varying float vAlpha;
+    void main() { gl_FragColor = vec4(1.0,0.85,0.6, vAlpha * uOpacity); }`,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const rays = new THREE.LineSegments(rayGeo, rayMat);
+contentScene.add(rays);
+
+// ── SHOOTING STAR ──
+const ssGroup = new THREE.Group();
+contentScene.add(ssGroup);
+
+const ssHeadGeo = new THREE.SphereGeometry(1.5, 8, 8);
+const ssTailGeo = new THREE.CylinderGeometry(0, 1.2, 1, 8);
+const ssMat = new THREE.ShaderMaterial({
+  uniforms: { uOpacity: { value: 0 }, uColor: { value: new THREE.Color(1, 0.95, 0.85) } },
+  vertexShader: `varying vec3 vPos;
+    void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `precision highp float;
+    uniform float uOpacity; uniform vec3 uColor; varying vec3 vPos;
+    void main() {
+      float glow = exp(-length(vPos) * 0.15);
+      gl_FragColor = vec4(uColor * (1.0 + glow * 0.5), uOpacity * glow);
+    }`,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  side: THREE.DoubleSide, fog: false, toneMapped: false,
+});
+const ssHead = new THREE.Mesh(ssHeadGeo, ssMat);
+const ssTail = new THREE.Mesh(ssTailGeo, ssMat.clone());
+ssGroup.add(ssHead);
+ssGroup.add(ssTail);
+ssGroup.visible = false;
+
+let ssActive = false, ssStart = 0, ssDur = 0;
+let ssAzStart = 0, ssAzEnd = 0, ssElev = 0;
+let ssNextTime = 30 + Math.random() * 30;
+const SS_R = 185;
+
+// ── DUST PARTICLES ──
+const DUST_COUNT = 500;
+const dustGeo = new THREE.BufferGeometry();
+const dustPos = new Float32Array(DUST_COUNT * 3);
+const dustVel = new Float32Array(DUST_COUNT * 3);
+for (let i = 0; i < DUST_COUNT; i++) {
+  dustPos[i*3]   = (Math.random()-0.5)*60;
+  dustPos[i*3+1] = Math.random()*40+5;
+  dustPos[i*3+2] = (Math.random()-0.5)*60;
+  dustVel[i*3]   = (Math.random()-0.5)*0.02;
+  dustVel[i*3+1] = (Math.random()-0.5)*0.01;
+  dustVel[i*3+2] = (Math.random()-0.5)*0.02;
+}
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+dustGeo.setAttribute('velocity', new THREE.BufferAttribute(dustVel, 3));
+const dustMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uOpacity: { value: 0.0 } },
+  vertexShader: `
+    attribute vec3 velocity;
+    uniform float uTime;
+    void main() {
+      vec3 pos = position + velocity * uTime;
+      pos = mod(pos + 30.0, 60.0) - 30.0;
+      vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+      gl_PointSize = 2.0 * (200.0 / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform float uOpacity;
+    void main() {
+      float d = length(gl_PointCoord - 0.5) * 2.0;
+      float alpha = smoothstep(1.0, 0.3, d) * uOpacity * 0.4;
+      gl_FragColor = vec4(1.0, 0.95, 0.88, alpha);
+    }
+  `,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const dust = new THREE.Points(dustGeo, dustMat);
+contentScene.add(dust);
+
+// ── PLANET ──
+const planetGroup = new THREE.Group();
+contentScene.add(planetGroup);
+const planetOrbitR = 100;
+const planetMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(6, 32, 32),
+  new THREE.MeshStandardMaterial({ color: 0xaa8866, roughness: 0.7, metalness: 0.1 })
+);
+planetGroup.add(planetMesh);
+
+// ── SATURN STAR ──
+const saturnStarGeo = new THREE.SphereGeometry(0.15, 8, 8);
+const saturnStarMat = new THREE.MeshBasicMaterial({ color: 0xffe8c0, fog: false, toneMapped: false });
+const saturnStar = new THREE.Mesh(saturnStarGeo, saturnStarMat);
+saturnStar.position.set(40, 25, -80);
+contentScene.add(saturnStar);
+
+// ── SATURN MAIN ──
+const saturnGroup = new THREE.Group();
+contentScene.add(saturnGroup);
+const saturnOrbitR = 90;
+const saturnMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(4, 32, 32),
+  new THREE.MeshStandardMaterial({ color: 0xe8d0a0, roughness: 0.6, metalness: 0.15 })
+);
+const ringGeo = new THREE.RingGeometry(5.5, 9, 64);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xd4c090, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+const saturnRing = new THREE.Mesh(ringGeo, ringMat);
+saturnRing.rotation.x = Math.PI * 0.4;
+saturnGroup.add(saturnMesh);
+saturnGroup.add(saturnRing);
+
+// ── GLB LOADER ──
+const gltfLoader = new GLTFLoader();
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://unpkg.com/three@0.162.0/examples/jsm/libs/draco/');
+gltfLoader.setDRACOLoader(dracoLoader);
+
+function loadGLB(id) {
+  const raw = document.getElementById(id)?.textContent?.trim();
+  if (!raw || raw === 'ASSET_PLACEHOLDER') return Promise.resolve(null);
+  const bin = atob(raw);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Promise(res => gltfLoader.parse(arr.buffer, '', g => res(g), () => res(null)));
+}
+
+// ── BIRDS ──
+const birdMixers = [], birdData = [];
+const BIRD_COUNT = 12;
+const BIRD_R_MIN = 20, BIRD_R_MAX = 70, BIRD_Y_MIN = 8, BIRD_Y_MAX = 35;
+
+loadGLB('birdsdata').then(gltf => {
+  if (!gltf) return;
+  for (let i = 0; i < BIRD_COUNT; i++) {
+    const clone = SkeletonUtils.clone(gltf.scene);
+    clone.scale.setScalar(0.3 + Math.random() * 0.2);
+    contentScene.add(clone);
+    const mixer = new THREE.AnimationMixer(clone);
+    if (gltf.animations.length > 0) {
+      const clip = gltf.animations[0];
+      const action = mixer.clipAction(clip);
+      action.timeScale = 0.8 + Math.random() * 0.4;
+      action.play();
+    }
+    birdMixers.push(mixer);
+    const angle = Math.random() * Math.PI * 2;
+    const r = BIRD_R_MIN + Math.random() * (BIRD_R_MAX - BIRD_R_MIN);
+    const y = BIRD_Y_MIN + Math.random() * (BIRD_Y_MAX - BIRD_Y_MIN);
+    birdData.push({
+      mesh: clone, angle, r, y,
+      speed: 0.015 + Math.random() * 0.02,
+      drift: (Math.random() - 0.5) * 0.001,
+      yDrift: (Math.random() - 0.5) * 0.0005,
+      bankAngle: 0,
+      opacity: 1.0,
+    });
+  }
+});
+
+// ── PLANET GLB ──
+loadGLB('planetdata').then(gltf => {
+  if (!gltf) return;
+  const model = gltf.scene;
+  model.scale.setScalar(2);
+  planetMesh.visible = false;
+  planetGroup.add(model);
+});
+
+// ── SATURN GLB ──
+loadGLB('saturndata').then(gltf => {
+  if (!gltf) return;
+  const model = gltf.scene;
+  model.scale.setScalar(1.5);
+  saturnMesh.visible = false;
+  saturnRing.visible = false;
+  saturnGroup.add(model);
+});
+
+
+// ═══════════════════════════════════════════════════════
+// ANIMATION
+// ═══════════════════════════════════════════════════════
+const br = t => (Math.sin(t*Math.PI*2/BREATH - Math.PI/2)+1)/2;
+const colT = new THREE.Color(), colC = new THREE.Color(0.7,0.5,0.4);
+let time = 0;
+let fpsFrames = 0, fpsLast = performance.now();
+const fpsEl = document.getElementById('fps');
+
+function updateScene(simTime, dt) {
+  time = simTime;
+
+  // ── SKY DRIFT ──
+  skySphere.rotation.y = (time/1800)*Math.PI*2;
+
+  // ── DUST ──
+  dustMat.uniforms.uTime.value = time;
+  const dustLoopT = time % 1800;
+  if (dustLoopT < 20) {
+    dustMat.uniforms.uOpacity.value = Math.min(1, dustLoopT / 10);
+  } else if (dustLoopT > 1780) {
+    dustMat.uniforms.uOpacity.value = Math.max(0, (1800 - dustLoopT) / 10);
+  } else {
+    dustMat.uniforms.uOpacity.value = 1.0;
+  }
+
+  // ── BREATHING + COLOUR ──
+  const b = br(time), hue = (time/CCYCLE)%1;
+  colT.setHSL(hue, 0.3, 0.15 + b*0.08);
+  const colLoopT = time % 1800;
+  const colBlend = colLoopT < 10 ? colLoopT/10 : colLoopT > 1790 ? (1800-colLoopT)/10 : 1;
+  hemiLight.color.copy(colT).lerp(colC, 0.5);
+  hemiLight.groundColor.setHSL((hue+0.5)%1, 0.2, 0.05);
+  hemiLight.intensity = (0.5 + b*0.3) * colBlend;
+  ambLight.color.copy(colT);
+  ambLight.intensity = (0.2 + b*0.15) * colBlend;
+
+  // ── SKY WARMTH ──
+  const skyPhase = (time/1800)*Math.PI*2;
+  const warmth = Math.pow((Math.sin(skyPhase)+1)/2, 2.0);
+  skySphereMat.uniforms.warmth.value = warmth;
+
+  contentScene.fog.color.setHSL(hue, 0.15 + warmth*0.15, 0.04 + warmth*0.06);
+
+  // ── STARS ──
+  const starOpacity = Math.max(0, 1.0 - warmth * 2.5);
+  starMat.uniforms.uOpacity.value = starOpacity;
+  starMat.uniforms.uTime.value = time;
+
+  // ── GOD RAYS ──
+  const rayOpacity = warmth * 0.6;
+  rayMat.uniforms.uOpacity.value = rayOpacity;
+  rays.rotation.y = time * 0.002;
+
+  // ── SHOOTING STAR ──
+  if (!ssActive && time >= ssNextTime) {
+    ssActive = true;
+    ssStart = time;
+    ssDur = 3.5 + Math.random() * 2.5;
+    const loopT = time % 1800;
+    const loopPhase = (loopT / 1800) * Math.PI * 2;
+    const skyAz = loopPhase;
+    ssAzStart = skyAz + (Math.random() - 0.5) * Math.PI * 0.8;
+    const arcLen = (37 + Math.random() * 95) * Math.PI / 180;
+    ssAzEnd = ssAzStart + (Math.random() < 0.5 ? arcLen : -arcLen);
+    ssElev = (15 + Math.random() * 35) * Math.PI / 180;
+    ssGroup.visible = true;
+    ssMat.uniforms.uOpacity.value = 0;
+    ssTail.material.uniforms.uOpacity.value = 0;
+  }
+
+  if (ssActive) {
+    const elapsed = time - ssStart;
+    const progress = Math.min(elapsed / ssDur, 1);
+    const fade = progress < 0.1 ? progress/0.1 : progress > 0.8 ? (1-progress)/0.2 : 1;
+    ssMat.uniforms.uOpacity.value = fade;
+    ssTail.material.uniforms.uOpacity.value = fade * 0.6;
+
+    const az = ssAzStart + (ssAzEnd - ssAzStart) * progress;
+    const elev = ssElev * (1 - progress * 0.3);
+    const ce = Math.cos(elev);
+    const hx = SS_R * Math.sin(az) * ce;
+    const hy = SS_R * Math.sin(elev);
+    const hz = -SS_R * Math.cos(az) * ce;
+    ssHead.position.set(hx, hy, hz);
+
+    const prevProg = Math.max(0, progress - 0.02);
+    const prevAz = ssAzStart + (ssAzEnd - ssAzStart) * prevProg;
+    const prevElev = ssElev * (1 - prevProg * 0.3);
+    const pce = Math.cos(prevElev);
+    const tx = SS_R * Math.sin(prevAz) * pce;
+    const ty = SS_R * Math.sin(prevElev);
+    const tz = -SS_R * Math.cos(prevAz) * pce;
+    ssTail.position.set(tx, ty, tz);
+    ssTail.lookAt(hx, hy, hz);
+    ssTail.scale.set(1, Math.max(3, progress * ssDur * 15), 1);
+
+    if (progress >= 1) {
+      ssActive = false;
+      ssGroup.visible = false;
+      ssNextTime = time + 20 + Math.random() * 10;
+    }
+  }
+
+  // ── PLANETS ──
+  const planetAngle = (time / 1800) * Math.PI * 2;
+  planetGroup.position.set(
+    planetOrbitR * Math.sin(planetAngle + Math.PI),
+    15 + Math.sin(time * 0.01) * 2,
+    -planetOrbitR * Math.cos(planetAngle + Math.PI)
+  );
+  planetGroup.rotation.y = time * 0.005;
+
+  saturnGroup.position.set(
+    saturnOrbitR * Math.sin(planetAngle),
+    20 + Math.sin(time * 0.008) * 3,
+    -saturnOrbitR * Math.cos(planetAngle)
+  );
+  saturnGroup.rotation.y = time * 0.003;
+
+  saturnStar.material.opacity = Math.max(0, 1 - warmth * 3);
+  saturnStar.material.transparent = true;
+
+  // ── BIRDS ──
+  for (const bd of birdData) {
+    bd.angle += bd.speed * dt;
+    bd.r += bd.drift * dt * 30;
+    bd.y += bd.yDrift * dt * 30;
+
+    if (bd.r < BIRD_R_MIN) bd.drift = Math.abs(bd.drift);
+    if (bd.r > BIRD_R_MAX) bd.drift = -Math.abs(bd.drift);
+    if (bd.y < BIRD_Y_MIN) bd.yDrift = Math.abs(bd.yDrift);
+    if (bd.y > BIRD_Y_MAX) bd.yDrift = -Math.abs(bd.yDrift);
+
+    const x = bd.r * Math.cos(bd.angle);
+    const z = bd.r * Math.sin(bd.angle);
+    bd.mesh.position.set(x, bd.y, z);
+    bd.mesh.rotation.y = -bd.angle + Math.PI / 2;
+
+    // Loop boundary fade
+    const loopT = time % 1800;
+    if (loopT > 1796) {
+      bd.opacity = Math.max(0, (1800 - loopT) / 4);
+    } else if (loopT < 4) {
+      bd.opacity = Math.min(1, loopT / 4);
+    } else {
+      bd.opacity = 1.0;
+    }
+    bd.mesh.traverse(c => { if (c.material) { c.material.transparent = true; c.material.opacity = bd.opacity; }});
+  }
+  for (const m of birdMixers) m.update(dt);
+}
+
+
+// ── LIVE PREVIEW ──
+const scrubDiv = document.createElement('div');
+scrubDiv.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:12px;background:rgba(0,0,0,0.7);padding:12px 24px;border-radius:12px;font-family:monospace;color:#c4a882;font-size:14px;';
+const slider = document.createElement('input');
+slider.type = 'range'; slider.min = 0; slider.max = 1800; slider.step = 1; slider.value = 0;
+slider.style.cssText = 'width:400px;cursor:pointer;';
+const info = document.createElement('span');
+info.style.cssText = 'min-width:280px;white-space:nowrap;';
+const playBtn = document.createElement('button');
+playBtn.textContent = '⏸'; playBtn.style.cssText = 'background:none;border:1px solid #c4a882;color:#c4a882;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:14px;';
+scrubDiv.appendChild(playBtn);
+scrubDiv.appendChild(slider);
+scrubDiv.appendChild(info);
+document.body.appendChild(scrubDiv);
+
+let liveT = 0, playing = true, scrubbing = false, timeScale = 1;
+playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? '⏸' : '▶'; };
+slider.oninput = () => { scrubbing = true; liveT = parseFloat(slider.value); };
+slider.onchange = () => { scrubbing = false; };
+document.addEventListener('keydown', e => {
+  if (e.key === 't' || e.key === 'T') {
+    timeScale = timeScale === 1 ? 30 : 1;
+    info.style.color = timeScale > 1 ? '#ff6666' : '#c4a882';
+  }
+});
+
+function animate() {
+  if (playing && !scrubbing) liveT += (1/60) * timeScale;
+  if (liveT > 1800) liveT = 0;
+  if (!scrubbing) slider.value = liveT;
+
+  const dt = (1/60) * timeScale;
+  updateScene(liveT, dt);
+
+  const mins = Math.floor(liveT/60), secs = Math.floor(liveT%60);
+  const warmth = Math.pow((Math.sin((liveT/1800)*Math.PI*2)+1)/2, 2.0);
+  const mix = 1.0 - warmth;
+  info.textContent = `${mins}:${secs.toString().padStart(2,'0')} / 30:00  ${timeScale>1?'⚡'+timeScale+'x  ':''}warmth=${warmth.toFixed(2)} (${mix<0.1?'Evening':mix>0.9?'Belfast':'blend'})`;
+
+  // Render cubemap from content
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  cubeCamera.update(renderer, contentScene);
+
+  // Update wall projections
+  const cubeTex = cubeRT.texture;
+  matWallFront.uniforms.tCube.value = cubeTex;
+  matWallRight.uniforms.tCube.value = cubeTex;
+  matWallBack.uniforms.tCube.value = cubeTex;
+  matWallLeft.uniforms.tCube.value = cubeTex;
+
+  // Update floor envmap
+  floorMat.envMap = cubeTex;
+
+  // Render room
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  controls.update();
+  renderer.render(roomScene, roomCamera);
+
+  // FPS
+  fpsFrames++;
+  const now = performance.now();
+  if (now - fpsLast > 500) {
+    fpsEl.textContent = `${(fpsFrames / ((now - fpsLast)/1000)).toFixed(1)} fps | Room: ${ROOM_W}×${ROOM_L}×${ROOM_H}m`;
+    fpsFrames = 0; fpsLast = now;
+  }
+
+  requestAnimationFrame(animate);
+}
+
+// Handle resize
+window.addEventListener('resize', () => {
+  roomCamera.aspect = window.innerWidth / window.innerHeight;
+  roomCamera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+document.getElementById('loading').classList.add('done');
+requestAnimationFrame(animate);
+
+</script>
+</body>
+</html>
