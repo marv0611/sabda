@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SABDA — Watchout 4-Wall Output (SCENE_NAME)</title>
+<style>
+*{margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#000}
+canvas{position:absolute;top:0;left:0}
+#loading{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;
+  align-items:center;justify-content:center;background:#0e0a0d;z-index:100;
+  font-family:'Georgia',serif;color:#c4a882;font-size:1.2rem;letter-spacing:0.2em;
+  transition:opacity 2s ease-out}
+#loading.done{opacity:0;pointer-events:none}
+#fps{position:fixed;top:8px;left:8px;z-index:50;font-family:monospace;
+  color:rgba(255,255,255,0.5);font-size:11px;background:rgba(0,0,0,0.4);
+  padding:4px 8px;border-radius:4px;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="loading">S A B D A — Watchout</div>
+<div id="fps"></div>
+
+<!-- ╔═══════════════════════════════════════════════════════════════════╗
+     ║  SCENE ASSETS                                                    ║
+     ║  Add <script id="..." type="text/plain">ASSET_PLACEHOLDER</script>║
+     ║  tags here for each base64-embedded asset your scene needs.      ║
+     ║  The assemble_*.py script replaces ASSET_PLACEHOLDER with data.  ║
+     ╚═══════════════════════════════════════════════════════════════════╝ -->
+<!-- SCENE_ASSETS_HERE -->
+
+<script type="importmap">{"imports":{
+  "three":"https://unpkg.com/three@0.162.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.162.0/examples/jsm/"
+}}</script>
+<script type="module">
+import * as THREE from 'three';
+// Add scene-specific imports below (GLTFLoader, DRACOLoader, SkeletonUtils, etc.)
+// SCENE_IMPORTS_HERE
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SABDA Two-Screen Render Template v1
+   
+   Reusable framework for any SABDA scene. Provides:
+   - 4-wall equirectangular projection from CubeCamera
+   - Watchout-compatible dual-strip layout (6928×2400)
+   - Live browser preview with time scrub, play/pause, timelapse
+   - Puppeteer interface for headless video rendering via render.js
+   - Guide overlays (toggle D key)
+   
+   Layout:
+   ┌─────────────────────┬────────────┐
+   │  Left (5008×1200)   │Front(1920) │  ← top row
+   ├─────────────────────┼────────────┤
+   │  Right (5008×1200)  │Back (1920) │  ← bottom row
+   └─────────────────────┴────────────┘
+   Total canvas: 6928 × 2400
+   
+   TO USE THIS TEMPLATE:
+   1. Replace SCENE_ASSETS_HERE with your asset <script> tags
+   2. Replace SCENE_IMPORTS_HERE with any extra Three.js imports
+   3. Replace SCENE_CONSTANTS_HERE with scene-specific constants
+   4. Replace SCENE_CONTENT_HERE with your scene elements added to contentScene
+   5. Implement window.SABDA_UPDATE_SCENE(time, dt) at SCENE_ANIMATION_HERE
+   6. Replace SCENE_STATUS_FN with a function returning status string for the HUD
+   7. Create an assemble_*.py to inject base64 assets
+   
+   Keyboard:
+     T — toggle 30× timelapse
+     D — toggle wall guide overlays
+     Space — play/pause (when preview controls visible)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+// ── WALL DIMENSIONS (from Unity Spout — do not change) ──
+const W_LEFT   = 5008, H_WALL = 1200;
+const W_RIGHT  = 5008;
+const W_FRONT  = 1920;
+const W_BACK   = 1920;
+const OUT_W = W_LEFT + W_FRONT;   // 6928
+const OUT_H = H_WALL * 2;         // 2400
+
+// ── SABDA ROOM GEOMETRY (for azimuth mapping — do not change) ──
+const ROOM_L = 15.00;   // long walls (Left/Right)
+const ROOM_W = 5.63;    // short walls (Front/Back)
+const PERIM = 2 * ROOM_L + 2 * ROOM_W;  // 41.26m
+
+// Wall order in the 360° panorama (azimuth 0 = centre of Front wall C):
+const uF = ROOM_W / PERIM;                    // 0.1364
+const uR = (ROOM_W + ROOM_L) / PERIM;         // 0.5000
+const uB = (2 * ROOM_W + ROOM_L) / PERIM;     // 0.6364
+
+// ── SHARED CONSTANTS ──
+const EYE_H = 1.6;   // Camera height (metres) — viewer eye level
+
+// ── SCENE-SPECIFIC CONSTANTS ──
+// SCENE_CONSTANTS_HERE
+
+
+// ═══════════════════════════════════════════════════════
+// RENDERER
+// ═══════════════════════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  powerPreference: 'high-performance',
+});
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setPixelRatio(1);
+renderer.setSize(OUT_W, OUT_H);
+document.body.appendChild(renderer.domElement);
+
+// ═══════════════════════════════════════════════════════
+// CONTENT SCENE + CUBECAMERA
+// ═══════════════════════════════════════════════════════
+const contentScene = new THREE.Scene();
+
+const CUBE_SIZE = 4096;
+const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
+  generateMipmaps: true,
+  minFilter: THREE.LinearMipmapLinearFilter,
+  type: THREE.UnsignedByteType,
+});
+const cubeCamera = new THREE.CubeCamera(0.05, 500, cubeRT);
+cubeCamera.position.set(0, EYE_H, 0);
+contentScene.add(cubeCamera);
+
+// ═══════════════════════════════════════════════════════
+// 4 EQUIRECT WALL RENDER TARGETS
+// ═══════════════════════════════════════════════════════
+const VFOV_RAD = 62.5 * Math.PI / 180.0;
+const ELEV_OFFSET = 3.0 * Math.PI / 180.0;
+
+function makeWallRT(w, h) {
+  return new THREE.WebGLRenderTarget(w, h, {
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    colorSpace: THREE.SRGBColorSpace,
+  });
+}
+
+const rtFront = makeWallRT(W_FRONT, H_WALL);
+const rtBack  = makeWallRT(W_BACK, H_WALL);
+const rtLeft  = makeWallRT(W_LEFT, H_WALL);
+const rtRight = makeWallRT(W_RIGHT, H_WALL);
+
+// Equirect shader — renders a specific azimuth range from the cubemap
+function makeEquirectMat(azStartFrac, azEndFrac) {
+  const azStart = azStartFrac * Math.PI * 2;
+  const azEnd   = azEndFrac * Math.PI * 2;
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      tCube: { value: null },
+      vFovRad: { value: VFOV_RAD },
+      elevOffset: { value: ELEV_OFFSET },
+      azStart: { value: azStart },
+      azRange: { value: azEnd - azStart },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+    `,
+    fragmentShader: `
+      precision highp float;
+      uniform samplerCube tCube;
+      uniform float vFovRad, elevOffset, azStart, azRange;
+      varying vec2 vUv;
+      float dither(vec2 co) {
+        return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+      }
+      void main() {
+        float azimuth = azStart + vUv.x * azRange;
+        float elevation = (vUv.y - 0.5) * vFovRad + elevOffset;
+        float ce = cos(elevation);
+        vec3 dir = vec3(sin(azimuth) * ce, sin(elevation), -cos(azimuth) * ce);
+        vec4 col = textureCube(tCube, dir);
+
+        // ── PROJECTION OPTIMIZATION (gentle) ──
+
+        // 1. Black floor lift — subtle, prevents dark patches in overlap zones
+        col.rgb = col.rgb * 0.97 + 0.015;
+
+        // 2. Strong contrast — 80% S-curve
+        vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
+        col.rgb = mix(col.rgb, scurve, 0.80);
+
+        // 3. Saturation boost — 28%
+        float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+        col.rgb = mix(vec3(luma), col.rgb, 1.28);
+
+        // 4. Soft highlight ceiling — no hard clip, just gentle compression above 0.85
+        col.rgb = min(col.rgb, 0.85 + (col.rgb - 0.85) * 0.3);
+
+        // 4. Gentle vignette on vertical edges — helps blend zones
+        float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
+        col.rgb *= topBottomFade * 0.05 + 0.95;
+
+        col.rgb += dither(gl_FragCoord.xy) / 255.0;
+        gl_FragColor = col;
+      }
+    `,
+    depthWrite: false, depthTest: false,
+  });
+}
+
+// Each wall's azimuth range (fraction of 360°)
+const matFront = makeEquirectMat(0.0, uF);
+const matRight = makeEquirectMat(uF, uR);
+const matBack  = makeEquirectMat(uR, uB);
+const matLeft  = makeEquirectMat(uB, 1.0);
+
+// Fullscreen quads for each wall render
+function makeEquirectScene(mat) {
+  const s = new THREE.Scene();
+  s.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+  return s;
+}
+const eqScnFront = makeEquirectScene(matFront);
+const eqScnRight = makeEquirectScene(matRight);
+const eqScnBack  = makeEquirectScene(matBack);
+const eqScnLeft  = makeEquirectScene(matLeft);
+const eqCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+// ═══════════════════════════════════════════════════════
+// COMPOSITE SCENE — blit 4 wall textures onto final canvas
+// Layout: Left+Front on top, Right+Back on bottom
+// ═══════════════════════════════════════════════════════
+const compScene = new THREE.Scene();
+const compCam = new THREE.OrthographicCamera(0, OUT_W, OUT_H, 0, -1, 1);
+
+function makeQuad(rt, x, y, w, h) {
+  const mat = new THREE.MeshBasicMaterial({ map: rt.texture });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+  mesh.position.set(x + w/2, y + h/2, 0);
+  return mesh;
+}
+
+// Top row: Left (0,1200) then Front (5008,1200)
+compScene.add(makeQuad(rtLeft,  0,       H_WALL, W_LEFT,  H_WALL));
+compScene.add(makeQuad(rtFront, W_LEFT,  H_WALL, W_FRONT, H_WALL));
+// Bottom row: Right (0,0) then Back (5008,0)
+compScene.add(makeQuad(rtRight, 0,       0,      W_RIGHT, H_WALL));
+compScene.add(makeQuad(rtBack,  W_RIGHT, 0,      W_BACK,  H_WALL));
+
+
+// ── GUIDE OVERLAYS (toggle with D key) ──
+const guideGroup = new THREE.Group();
+
+// Horizontal divider
+const divGeo = new THREE.PlaneGeometry(OUT_W, 3);
+const divMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+const divLine = new THREE.Mesh(divGeo, divMat);
+divLine.position.set(OUT_W/2, H_WALL/2, 0.1);
+guideGroup.add(divLine);
+
+// Vertical divider
+const vdivGeo = new THREE.PlaneGeometry(3, OUT_H);
+const vdivLine = new THREE.Mesh(vdivGeo, divMat);
+vdivLine.position.set(W_LEFT, OUT_H/2, 0.1);
+guideGroup.add(vdivLine);
+
+// Labels
+function makeLabel(text, x, y) {
+  const cvs = document.createElement('canvas');
+  cvs.width = 512; cvs.height = 48;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, 512, 48);
+  ctx.font = 'bold 28px monospace';
+  ctx.fillStyle = '#ff3333';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 256, 24);
+  const tex = new THREE.CanvasTexture(cvs);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(280, 30), mat);
+  mesh.position.set(x, y, 0.2);
+  return mesh;
+}
+guideGroup.add(makeLabel('LEFT (5008×1200)',  W_LEFT/2,  OUT_H - 25));
+guideGroup.add(makeLabel('FRONT (1920×1200)', W_LEFT + W_FRONT/2, OUT_H - 25));
+guideGroup.add(makeLabel('RIGHT (5008×1200)', W_RIGHT/2, H_WALL - 25));
+guideGroup.add(makeLabel('BACK (1920×1200)',  W_RIGHT + W_BACK/2, H_WALL - 25));
+
+compScene.add(guideGroup);
+let showGuides = true;
+document.addEventListener('keydown', e => {
+  if (e.key === 'd' || e.key === 'D') {
+    showGuides = !showGuides;
+    guideGroup.visible = showGuides;
+  }
+});
+
+
+// ╔═══════════════════════════════════════════════════════════════════╗
+// ║  SCENE CONTENT                                                    ║
+// ║  Add all your scene elements to `contentScene` here.              ║
+// ║  Available objects:                                                ║
+// ║    contentScene — the THREE.Scene to add meshes/lights to         ║
+// ║    renderer     — the WebGLRenderer                               ║
+// ║    EYE_H        — camera height (1.6m)                            ║
+// ║    cubeCamera   — positioned at (0, EYE_H, 0)                    ║
+// ║                                                                    ║
+// ║  Helper for base64 textures:                                      ║
+// ║    function b64T(id, mapping) — loads <script id="..."> as texture║
+// ╚═══════════════════════════════════════════════════════════════════╝
+
+// Base64 texture loader utility
+function b64T(id, mapping) {
+  const raw = document.getElementById(id)?.textContent?.trim();
+  if (!raw || raw === 'ASSET_PLACEHOLDER') return null;
+  const tex = new THREE.TextureLoader().load('data:image/jpeg;base64,' + raw);
+  if (mapping) tex.mapping = mapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// SCENE_CONTENT_HERE
+
+
+// ═══════════════════════════════════════════════════════
+// ANIMATION + RENDER
+// ═══════════════════════════════════════════════════════
+let time = 0;
+const fpsEl = document.getElementById('fps');
+let fpsFrames = 0, fpsLast = performance.now();
+
+
+// ╔═══════════════════════════════════════════════════════════════════╗
+// ║  SCENE ANIMATION                                                  ║
+// ║  Define window.SABDA_UPDATE_SCENE(time, dt) here.                 ║
+// ║  This is called every frame with the current simulation time      ║
+// ║  (0-1800s) and delta time. Update all scene object positions,     ║
+// ║  uniforms, rotations, etc.                                        ║
+// ║                                                                    ║
+// ║  Also define window.SABDA_STATUS(time) returning a string for     ║
+// ║  the HUD info display (e.g. "warmth=0.42 mix=0.58 (blend)").     ║
+// ╚═══════════════════════════════════════════════════════════════════╝
+
+// SCENE_ANIMATION_HERE
+// Example:
+// window.SABDA_UPDATE_SCENE = function(time, dt) {
+//   skySphere.rotation.y = (time/1800)*Math.PI*2;
+//   dustMat.uniforms.uTime.value = time;
+//   // ... all animation updates ...
+// };
+//
+// window.SABDA_STATUS = function(time) {
+//   const warmth = Math.pow((Math.sin((time/1800)*Math.PI*2)+1)/2, 2.0);
+//   return `warmth=${warmth.toFixed(2)}`;
+// };
+
+
+// ═══ PUPPETEER INTERFACE ═══
+// Expose render targets and renderer for pixel extraction by render.js
+window.SABDA_RENDERER = renderer;
+window.SABDA_WALLS = {
+  left: rtLeft,
+  right: rtRight,
+  front: rtFront,
+  back: rtBack,
+};
+
+// Master render function — calls scene update then renders 4 walls
+window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
+  const dt = (1/30) * (speedMultiplier || 1);
+  time = simTime;
+
+  // 1. Update scene content (scene-specific)
+  if (window.SABDA_UPDATE_SCENE) {
+    window.SABDA_UPDATE_SCENE(time, dt);
+  }
+
+  // 2. Render cubemap from content scene
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.setRenderTarget(null);
+  cubeCamera.update(renderer, contentScene);
+
+  // 3. Project cubemap onto 4 wall render targets
+  renderer.toneMapping = THREE.NoToneMapping;
+  const cubeTex = cubeRT.texture;
+  matFront.uniforms.tCube.value = cubeTex;
+  matRight.uniforms.tCube.value = cubeTex;
+  matBack.uniforms.tCube.value = cubeTex;
+  matLeft.uniforms.tCube.value = cubeTex;
+
+  renderer.setRenderTarget(rtFront); renderer.render(eqScnFront, eqCam);
+  renderer.setRenderTarget(rtRight); renderer.render(eqScnRight, eqCam);
+  renderer.setRenderTarget(rtBack);  renderer.render(eqScnBack, eqCam);
+  renderer.setRenderTarget(rtLeft);  renderer.render(eqScnLeft, eqCam);
+
+  renderer.setRenderTarget(null);
+};
+
+
+// ── LIVE PREVIEW (browser only, skipped by Puppeteer) ──
+if (!window.__SABDA_PUPPETEER__) {
+  const scrubDiv = document.createElement('div');
+  scrubDiv.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:20px;background:rgba(0,0,0,0.7);padding:20px 40px;border-radius:12px;font-family:monospace;color:#c4a882;font-size:48px;';
+  const slider = document.createElement('input');
+  slider.type = 'range'; slider.min = 0; slider.max = 1800; slider.step = 1; slider.value = 0;
+  slider.style.cssText = 'width:3000px;cursor:pointer;height:40px;';
+  const info = document.createElement('span');
+  info.style.cssText = 'min-width:900px;white-space:nowrap;';
+  const playBtn = document.createElement('button');
+  playBtn.textContent = '⏸'; playBtn.style.cssText = 'background:none;border:2px solid #c4a882;color:#c4a882;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:48px;';
+  scrubDiv.appendChild(playBtn);
+  scrubDiv.appendChild(slider);
+  scrubDiv.appendChild(info);
+  document.body.appendChild(scrubDiv);
+
+  let liveT = 0, playing = true, scrubbing = false, timeScale = 1;
+  playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? '⏸' : '▶'; };
+  slider.oninput = () => { scrubbing = true; liveT = parseFloat(slider.value); };
+  slider.onchange = () => { scrubbing = false; };
+  document.addEventListener('keydown', e => {
+    if (e.key === 't' || e.key === 'T') {
+      timeScale = timeScale === 1 ? 30 : 1;
+      info.style.color = timeScale > 1 ? '#ff6666' : '#c4a882';
+    }
+  });
+
+  function liveLoop() {
+    if (playing && !scrubbing) liveT += (1/30) * timeScale;
+    if (liveT > 1800) liveT = 0;
+    if (!scrubbing) slider.value = liveT;
+
+    const mins = Math.floor(liveT/60), secs = Math.floor(liveT%60);
+    const statusStr = window.SABDA_STATUS ? window.SABDA_STATUS(liveT) : '';
+    info.textContent = `${mins}:${secs.toString().padStart(2,'0')} / 30:00  ${timeScale>1?'⚡'+timeScale+'x  ':''}${statusStr}`;
+
+    window.SABDA_RENDER_FRAME(liveT, timeScale);
+
+    // FPS counter
+    fpsFrames++;
+    const now = performance.now();
+    if (now - fpsLast > 500) {
+      fpsEl.textContent = `${(fpsFrames / ((now - fpsLast)/1000)).toFixed(1)} fps`;
+      fpsFrames = 0; fpsLast = now;
+    }
+
+    // Composite to screen
+    renderer.setRenderTarget(null);
+    renderer.render(compScene, compCam);
+    requestAnimationFrame(liveLoop);
+  }
+  document.getElementById('loading').classList.add('done');
+  requestAnimationFrame(liveLoop);
+}
+
+</script>
+</body>
+</html>

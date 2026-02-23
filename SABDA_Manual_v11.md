@@ -1969,6 +1969,124 @@ Wall B  │                     │  Wall D
 
 Wall B = planet side. Wall D = Saturn side.
 
+## 27. Two-Screen Render Preview Template (v11.5)
+
+### Overview
+
+`sabda_template_slim.html` is a reusable framework for any SABDA scene. It provides the complete Watchout-compatible dual-strip rendering pipeline — 4-wall equirectangular projection, live browser preview with time scrubbing, and Puppeteer headless rendering interface — without any scene-specific content.
+
+**What the template provides (you don't touch these):**
+- Wall dimensions: Left/Right 5008×1200, Front/Back 1920×1200
+- Room geometry and azimuth mapping (41.26m perimeter)
+- WebGLRenderer at 6928×2400
+- CubeCamera (4096px) at eye height (1.6m)
+- 4 wall render targets with equirect projection shader (contrast, saturation, dithering)
+- Composite scene blitting 4 walls into dual-strip layout
+- Guide overlays with wall labels (toggle D key)
+- Puppeteer interface: `SABDA_RENDERER`, `SABDA_WALLS`, `SABDA_RENDER_FRAME()`
+- Live preview: time slider (0-1800s), play/pause, T for 30× timelapse, FPS counter
+
+**What you fill in (6 insertion points):**
+
+| Placeholder | What to put there |
+|---|---|
+| `SCENE_ASSETS_HERE` | `<script id="..." type="text/plain">ASSET_PLACEHOLDER</script>` tags for each base64 asset |
+| `SCENE_IMPORTS_HERE` | Extra Three.js imports (GLTFLoader, DRACOLoader, SkeletonUtils, etc.) |
+| `SCENE_CONSTANTS_HERE` | Scene-specific constants (BREATH, CCYCLE, sky colours, etc.) |
+| `SCENE_CONTENT_HERE` | All meshes, lights, particles, loaders added to `contentScene` |
+| `SCENE_ANIMATION_HERE` | `window.SABDA_UPDATE_SCENE(time, dt)` — all per-frame animation |
+| `SCENE_STATUS_FN` | `window.SABDA_STATUS(time)` — returns HUD string (e.g. "warmth=0.42") |
+
+### How to create a new scene
+
+```bash
+# 1. Copy template
+cp sabda_template_slim.html sabda_SCENENAME_render_slim.html
+
+# 2. Edit the file — fill in the 6 placeholder sections
+#    Search for "SCENE_" to find each insertion point
+
+# 3. Create assets directory and assemble script
+mkdir assets_SCENENAME
+cp assemble_evening.py assemble_SCENENAME.py
+# Edit assemble_SCENENAME.py: change paths, asset IDs
+
+# 4. Assemble and test
+python3 assemble_SCENENAME.py
+# Open sabda_SCENENAME_render_full.html in Chrome
+# Use time slider, T key for timelapse, D for guides
+
+# 5. Render preview (60s output, ~7 min)
+# Edit render.js to point at new HTML filename
+node render.js
+
+# 6. Full render (30min output, ~3-5 hours)
+node render.js full
+```
+
+### Available objects in scene content section
+
+| Object | Type | Description |
+|---|---|---|
+| `contentScene` | THREE.Scene | Add all meshes, lights, particles here |
+| `renderer` | THREE.WebGLRenderer | For creating textures, custom RTs |
+| `EYE_H` | Number (1.6) | Camera height in metres |
+| `cubeCamera` | THREE.CubeCamera | At (0, EYE_H, 0) — don't move |
+| `b64T(id, mapping)` | Function | Load `<script id="...">` as THREE.Texture |
+
+### Keyboard shortcuts (live preview)
+
+| Key | Action |
+|---|---|
+| T | Toggle 30× timelapse |
+| D | Toggle wall guide overlays (red lines + labels) |
+| Space | Play/pause (via button) |
+| Slider | Scrub to any point in 0-1800s range |
+
+### Architecture diagram
+
+```
+  Scene Content (your code)
+         ↓
+    contentScene
+         ↓
+  ┌──────────────┐
+  │  CubeCamera  │  captures 360° at eye height
+  │  (4096px)    │
+  └──────────────┘
+         ↓
+  cubeRT (cubemap texture)
+         ↓
+  ┌─────────────────────────────────────┐
+  │  4× Equirect Projection Shaders    │
+  │  Each maps an azimuth slice to a   │
+  │  flat wall render target           │
+  │                                     │
+  │  Front: 0° → 49°   (1920×1200)    │
+  │  Right: 49° → 180° (5008×1200)    │
+  │  Back:  180° → 229° (1920×1200)   │
+  │  Left:  229° → 360° (5008×1200)   │
+  └─────────────────────────────────────┘
+         ↓
+  ┌─────────────────────┬────────────┐
+  │  Left (5008×1200)   │Front(1920) │  ← compScene top row
+  ├─────────────────────┼────────────┤
+  │  Right (5008×1200)  │Back (1920) │  ← compScene bottom row
+  └─────────────────────┴────────────┘
+         ↓
+  Browser preview  OR  Puppeteer → FFmpeg → MP4
+```
+
+### Compatibility with render.js
+
+The template exposes the same interface render.js expects:
+- `window.__SABDA_PUPPETEER__` — set by render.js to skip live preview
+- `window.SABDA_RENDER_FRAME(simTime, speedMultiplier)` — advance + render one frame
+- `window.SABDA_RENDERER` — the WebGLRenderer for readPixels
+- `window.SABDA_WALLS` — `{ left, right, front, back }` render targets
+
+No changes to render.js needed — just update the HTML filename it opens.
+
 ---
 
 *Manual v11 — February 2026*
