@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SABDA — 360° Room Viewer (Chinese Landscape)</title>
+<style>
+*{margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#000}
+canvas{position:absolute;top:0;left:0}
+#loading{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;
+  align-items:center;justify-content:center;background:#1a1a1a;z-index:100;
+  font-family:'Georgia',serif;color:#c4a882;font-size:1.2rem;letter-spacing:0.2em;
+  transition:opacity 2s ease-out}
+#loading.done{opacity:0;pointer-events:none}
+#fps{position:fixed;top:8px;left:8px;z-index:50;font-family:monospace;
+  color:rgba(255,255,255,0.5);font-size:11px;background:rgba(0,0,0,0.4);
+  padding:4px 8px;border-radius:4px;pointer-events:none}
+#help{position:fixed;top:8px;right:8px;z-index:50;font-family:monospace;
+  color:rgba(196,168,130,0.6);font-size:11px;background:rgba(0,0,0,0.4);
+  padding:8px 12px;border-radius:4px;pointer-events:none;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="loading">水 墨 山 水 — Chinese Landscape</div>
+<div id="fps"></div>
+<div id="help">Drag to look • Scroll to zoom • T = timelapse • L = labels</div>
+
+<script type="importmap">{"imports":{
+  "three":"https://unpkg.com/three@0.162.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.162.0/examples/jsm/"
+}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SABDA 360° Room Viewer — Chinese Ink-Wash Landscape (水墨山水)
+   
+   Procedural Chinese mountain landscape with:
+   - Layered misty mountains (ink-wash style)
+   - Drifting fog/clouds
+   - Subtle moon
+   - Floating dust motes (like incense smoke)
+   - Cherry blossom petals
+   - Meditative colour cycling (warm amber ↔ cool blue-grey)
+   
+   Room: 15m × 5.63m × 3.23m
+   Floor: matte gray #787878
+   ═══════════════════════════════════════════════════════════════════════ */
+
+// ── SABDA ROOM GEOMETRY ──
+const ROOM_L = 15.00;
+const ROOM_W = 5.63;
+const ROOM_H = 3.23;
+const PERIM = 2 * ROOM_L + 2 * ROOM_W;
+const EYE_H = 1.6;
+
+const uF = ROOM_W / PERIM;
+const uR = (ROOM_W + ROOM_L) / PERIM;
+const uB = (2 * ROOM_W + ROOM_L) / PERIM;
+
+const BREATH = 14, CCYCLE = 120;
+
+
+// ═══════════════════════════════════════════════════════
+// RENDERER
+// ═══════════════════════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+
+// ═══════════════════════════════════════════════════════
+// CONTENT SCENE (rendered to cubemap)
+// ═══════════════════════════════════════════════════════
+const contentScene = new THREE.Scene();
+
+const CUBE_SIZE = 2048;
+const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
+  generateMipmaps: true,
+  minFilter: THREE.LinearMipmapLinearFilter,
+  type: THREE.HalfFloatType,
+});
+const cubeCamera = new THREE.CubeCamera(0.05, 500, cubeRT);
+cubeCamera.position.set(0, EYE_H, 0);
+contentScene.add(cubeCamera);
+
+
+// ═══════════════════════════════════════════════════════
+// PROCEDURAL CHINESE LANDSCAPE SKY
+// ═══════════════════════════════════════════════════════
+
+const skyMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uWarmth: { value: 0.5 },
+  },
+  vertexShader: `
+    varying vec3 vWorldPos;
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform float uTime;
+    uniform float uWarmth;
+    varying vec3 vWorldPos;
+    varying vec2 vUv;
+
+    // Simplex-style noise
+    vec3 mod289(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
+    vec4 mod289(vec4 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
+    vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+    vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+    float snoise(vec3 v) {
+      const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+      const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+      vec3 i = floor(v + dot(v, C.yyy));
+      vec3 x0 = v - i + dot(i, C.xxx);
+      vec3 g = step(x0.yzx, x0.xyz);
+      vec3 l = 1.0 - g;
+      vec3 i1 = min(g.xyz, l.zxy);
+      vec3 i2 = max(g.xyz, l.zxy);
+      vec3 x1 = x0 - i1 + C.xxx;
+      vec3 x2 = x0 - i2 + C.yyy;
+      vec3 x3 = x0 - D.yyy;
+      i = mod289(i);
+      vec4 p = permute(permute(permute(
+        i.z + vec4(0.0, i1.z, i2.z, 1.0))
+        + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+        + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+      float n_ = 0.142857142857;
+      vec3 ns = n_ * D.wyz - D.xzx;
+      vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+      vec4 x_ = floor(j * ns.z);
+      vec4 y_ = floor(j - 7.0 * x_);
+      vec4 x = x_ * ns.x + ns.yyyy;
+      vec4 y = y_ * ns.x + ns.yyyy;
+      vec4 h = 1.0 - abs(x) - abs(y);
+      vec4 b0 = vec4(x.xy, y.xy);
+      vec4 b1 = vec4(x.zw, y.zw);
+      vec4 s0 = floor(b0)*2.0 + 1.0;
+      vec4 s1 = floor(b1)*2.0 + 1.0;
+      vec4 sh = -step(h, vec4(0.0));
+      vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+      vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+      vec3 p0 = vec3(a0.xy, h.x);
+      vec3 p1 = vec3(a0.zw, h.y);
+      vec3 p2 = vec3(a1.xy, h.z);
+      vec3 p3 = vec3(a1.zw, h.w);
+      vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+      p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+      vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+      m = m * m;
+      return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+    }
+
+    float fbm(vec3 p) {
+      float v = 0.0;
+      float a = 0.5;
+      for (int i = 0; i < 5; i++) {
+        v += a * snoise(p);
+        p *= 2.0;
+        a *= 0.5;
+      }
+      return v;
+    }
+
+    // Mountain silhouette at given azimuth and layer depth
+    float mountain(float az, float layer, float scale, float offset) {
+      float n = fbm(vec3(az * scale, layer * 3.0, offset + uTime * 0.002));
+      return n * 0.3 + 0.1 * sin(az * 2.3 + layer) + 0.05 * sin(az * 7.1 + layer * 2.0);
+    }
+
+    void main() {
+      vec3 dir = normalize(vWorldPos);
+      float azimuth = atan(dir.x, -dir.z);
+      float elevation = asin(clamp(dir.y, -1.0, 1.0));
+      float elevNorm = elevation / (3.14159 * 0.5); // -1 to 1
+
+      // ── SKY GRADIENT ──
+      // Warm: amber/golden mist. Cool: blue-grey ink wash
+      vec3 skyTop_warm = vec3(0.85, 0.75, 0.60);
+      vec3 skyBot_warm = vec3(0.95, 0.88, 0.78);
+      vec3 skyTop_cool = vec3(0.55, 0.60, 0.70);
+      vec3 skyBot_cool = vec3(0.75, 0.78, 0.82);
+
+      vec3 skyTop = mix(skyTop_cool, skyTop_warm, uWarmth);
+      vec3 skyBot = mix(skyBot_cool, skyBot_warm, uWarmth);
+
+      float skyGrad = smoothstep(-0.05, 0.6, elevNorm);
+      vec3 sky = mix(skyBot, skyTop, skyGrad);
+
+      // ── MOUNTAIN LAYERS (ink wash style — 5 layers, back to front) ──
+      vec3 col = sky;
+
+      for (int i = 0; i < 5; i++) {
+        float fi = float(i);
+        float depth = 1.0 - fi * 0.18; // furthest = lightest
+        float scale = 1.5 + fi * 0.8;
+        float baseH = 0.12 + fi * 0.04;
+        float height = baseH + mountain(azimuth, fi, scale, fi * 100.0);
+
+        // Mountain visible where elevation < height
+        float edge = smoothstep(height + 0.008, height - 0.005, elevNorm);
+
+        // Ink darkness increases for nearer mountains
+        float inkDark = 0.15 + fi * 0.12;
+        vec3 inkColor_warm = vec3(0.35 - fi*0.04, 0.28 - fi*0.03, 0.22 - fi*0.02);
+        vec3 inkColor_cool = vec3(0.20 - fi*0.03, 0.22 - fi*0.03, 0.28 - fi*0.03);
+        vec3 inkColor = mix(inkColor_cool, inkColor_warm, uWarmth);
+
+        // Atmospheric perspective — far mountains fade to sky color
+        vec3 mtColor = mix(sky * (0.85 - fi * 0.05), inkColor, depth * 0.5 + fi * 0.1);
+
+        col = mix(col, mtColor, edge);
+      }
+
+      // ── DRIFTING MIST/CLOUDS ──
+      float mistAz = azimuth + uTime * 0.003;
+      float mist1 = smoothstep(0.2, 0.6, fbm(vec3(mistAz * 1.5, elevNorm * 3.0, uTime * 0.01)));
+      float mist2 = smoothstep(0.3, 0.7, fbm(vec3(mistAz * 0.8 + 50.0, elevNorm * 2.0 + 10.0, uTime * 0.008)));
+      float mistBand = smoothstep(0.0, 0.15, elevNorm) * smoothstep(0.35, 0.15, elevNorm); // concentrated in mountain zone
+      float mist = (mist1 * 0.4 + mist2 * 0.3) * mistBand;
+      col = mix(col, sky * 1.05, mist);
+
+      // ── MOON ──
+      vec3 moonDir = normalize(vec3(0.3, 0.7, -0.5));
+      float moonDot = dot(dir, moonDir);
+      float moonDisc = smoothstep(0.9985, 0.9995, moonDot);
+      float moonGlow = smoothstep(0.98, 0.9995, moonDot) * 0.15;
+      vec3 moonColor = vec3(1.0, 0.97, 0.90);
+      col += moonColor * moonDisc * 0.8 * (1.0 - uWarmth * 0.5);
+      col += moonColor * moonGlow * (1.0 - uWarmth * 0.7);
+
+      // ── SUBTLE STARS (cool phase only) ──
+      float starField = snoise(dir * 200.0);
+      float starMask = smoothstep(0.92, 0.95, starField) * smoothstep(0.3, 0.5, elevNorm);
+      col += vec3(1.0, 0.98, 0.92) * starMask * 0.3 * (1.0 - uWarmth);
+
+      // ── GROUND/WATER BELOW HORIZON ──
+      if (elevNorm < 0.0) {
+        vec3 waterColor_warm = vec3(0.25, 0.22, 0.18);
+        vec3 waterColor_cool = vec3(0.15, 0.18, 0.22);
+        vec3 waterColor = mix(waterColor_cool, waterColor_warm, uWarmth);
+
+        // Water ripples
+        float ripple = snoise(vec3(azimuth * 10.0, elevNorm * 5.0, uTime * 0.05)) * 0.03;
+        float waterBlend = smoothstep(0.0, -0.15, elevNorm);
+        col = mix(col, waterColor + ripple, waterBlend);
+
+        // Reflection of sky in water
+        col += sky * 0.08 * (1.0 - waterBlend * 0.5);
+      }
+
+      // ── VIGNETTE ──
+      float vig = 1.0 - smoothstep(0.5, 1.5, abs(elevNorm)) * 0.15;
+      col *= vig;
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+  side: THREE.BackSide,
+});
+const skySphere = new THREE.Mesh(new THREE.SphereGeometry(200, 64, 32), skyMat);
+contentScene.add(skySphere);
+
+
+// ── LIGHTING ──
+const hemiLight = new THREE.HemisphereLight(0xc4a882, 0x1a1a20, 0.6);
+contentScene.add(hemiLight);
+const ambLight = new THREE.AmbientLight(0x8a7a70, 0.3);
+contentScene.add(ambLight);
+
+// ── CONTENT FOG ──
+contentScene.fog = new THREE.FogExp2(0x9a8a80, 0.003);
+
+
+// ── FLOATING DUST / INCENSE PARTICLES ──
+const DUST_COUNT = 400;
+const dustGeo = new THREE.BufferGeometry();
+const dustPos = new Float32Array(DUST_COUNT * 3);
+const dustVel = new Float32Array(DUST_COUNT * 3);
+for (let i = 0; i < DUST_COUNT; i++) {
+  dustPos[i*3]   = (Math.random()-0.5)*60;
+  dustPos[i*3+1] = Math.random()*40+5;
+  dustPos[i*3+2] = (Math.random()-0.5)*60;
+  dustVel[i*3]   = (Math.random()-0.5)*0.015;
+  dustVel[i*3+1] = (Math.random()-0.5)*0.008 + 0.003; // slight upward drift (incense)
+  dustVel[i*3+2] = (Math.random()-0.5)*0.015;
+}
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+dustGeo.setAttribute('velocity', new THREE.BufferAttribute(dustVel, 3));
+const dustMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uOpacity: { value: 0.6 } },
+  vertexShader: `
+    attribute vec3 velocity;
+    uniform float uTime;
+    void main() {
+      vec3 pos = position + velocity * uTime;
+      pos = mod(pos + 30.0, 60.0) - 30.0;
+      vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+      gl_PointSize = 2.5 * (200.0 / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform float uOpacity;
+    void main() {
+      float d = length(gl_PointCoord - 0.5) * 2.0;
+      float alpha = smoothstep(1.0, 0.3, d) * uOpacity * 0.35;
+      gl_FragColor = vec4(1.0, 0.95, 0.88, alpha);
+    }
+  `,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const dust = new THREE.Points(dustGeo, dustMat);
+contentScene.add(dust);
+
+
+// ── CHERRY BLOSSOM PETALS ──
+const PETAL_COUNT = 150;
+const petalGeo = new THREE.BufferGeometry();
+const petalPos = new Float32Array(PETAL_COUNT * 3);
+const petalData = []; // { phase, speed, radius, y, sway }
+for (let i = 0; i < PETAL_COUNT; i++) {
+  const r = 10 + Math.random() * 50;
+  const angle = Math.random() * Math.PI * 2;
+  const y = 5 + Math.random() * 30;
+  petalPos[i*3]   = r * Math.cos(angle);
+  petalPos[i*3+1] = y;
+  petalPos[i*3+2] = r * Math.sin(angle);
+  petalData.push({
+    phase: Math.random() * Math.PI * 2,
+    speed: 0.3 + Math.random() * 0.5,
+    radius: r,
+    baseY: y,
+    sway: 2 + Math.random() * 5,
+    fallSpeed: 0.2 + Math.random() * 0.4,
+  });
+}
+petalGeo.setAttribute('position', new THREE.BufferAttribute(petalPos, 3));
+const petalMat = new THREE.ShaderMaterial({
+  uniforms: { uOpacity: { value: 0.7 } },
+  vertexShader: `
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = 4.0 * (150.0 / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform float uOpacity;
+    void main() {
+      float d = length(gl_PointCoord - 0.5) * 2.0;
+      // Petal shape — slightly elongated
+      vec2 p = gl_PointCoord - 0.5;
+      float petal = smoothstep(0.5, 0.2, length(p * vec2(1.0, 1.5)));
+      gl_FragColor = vec4(1.0, 0.85, 0.88, petal * uOpacity * 0.6);
+    }
+  `,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const petals = new THREE.Points(petalGeo, petalMat);
+contentScene.add(petals);
+
+
+// ── GOD RAYS (soft, ink-wash style) ──
+const rayCount = 6;
+const rayGeo = new THREE.BufferGeometry();
+const rayPositions = new Float32Array(rayCount * 6);
+const rayAlphas = new Float32Array(rayCount * 2);
+for (let i = 0; i < rayCount; i++) {
+  const angle = (i / rayCount) * Math.PI * 2 + Math.random() * 0.4;
+  const r1 = 100, r2 = 170;
+  const y1 = 15 + Math.random() * 25;
+  const y2 = 50 + Math.random() * 35;
+  rayPositions[i*6]   = r1 * Math.cos(angle);
+  rayPositions[i*6+1] = y1;
+  rayPositions[i*6+2] = r1 * Math.sin(angle);
+  rayPositions[i*6+3] = r2 * Math.cos(angle);
+  rayPositions[i*6+4] = y2;
+  rayPositions[i*6+5] = r2 * Math.sin(angle);
+  rayAlphas[i*2] = 0.2 + Math.random() * 0.2;
+  rayAlphas[i*2+1] = 0.0;
+}
+rayGeo.setAttribute('position', new THREE.BufferAttribute(rayPositions, 3));
+rayGeo.setAttribute('alpha', new THREE.BufferAttribute(rayAlphas, 1));
+const rayMat = new THREE.ShaderMaterial({
+  uniforms: { uOpacity: { value: 0.0 } },
+  vertexShader: `attribute float alpha; varying float vAlpha;
+    void main() { vAlpha = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `precision highp float; uniform float uOpacity; varying float vAlpha;
+    void main() { gl_FragColor = vec4(1.0,0.92,0.80, vAlpha * uOpacity); }`,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const rays = new THREE.LineSegments(rayGeo, rayMat);
+contentScene.add(rays);
+
+
+// ═══════════════════════════════════════════════════════
+// ROOM SCENE
+// ═══════════════════════════════════════════════════════
+const roomScene = new THREE.Scene();
+roomScene.fog = new THREE.FogExp2(0x0a0808, 0.025);
+
+const roomCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+roomCamera.position.set(0, EYE_H, 0);
+
+const controls = new OrbitControls(roomCamera, renderer.domElement);
+controls.target.set(0, EYE_H, -0.01);
+controls.enablePan = false;
+controls.enableZoom = true;
+controls.minDistance = 0.1;
+controls.maxDistance = 6;
+controls.rotateSpeed = 0.5;
+controls.zoomSpeed = 0.8;
+controls.update();
+
+// ── FLOOR ──
+const floorMat = new THREE.MeshStandardMaterial({
+  color: 0x787878,
+  roughness: 0.75,
+  metalness: 0.05,
+  envMap: cubeRT.texture,
+  envMapIntensity: 0.08,
+});
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_L), floorMat);
+floor.rotation.x = -Math.PI / 2;
+roomScene.add(floor);
+
+// ── CEILING ──
+const ceiling = new THREE.Mesh(
+  new THREE.PlaneGeometry(ROOM_W, ROOM_L),
+  new THREE.MeshBasicMaterial({ color: 0x111111 })
+);
+ceiling.rotation.x = Math.PI / 2;
+ceiling.position.y = ROOM_H;
+roomScene.add(ceiling);
+
+// ── WALL PROJECTION SHADER ──
+const VFOV_RAD = 62.5 * Math.PI / 180.0;
+const ELEV_OFFSET = 3.0 * Math.PI / 180.0;
+
+function makeWallProjectionMat(azStartFrac, azEndFrac) {
+  const azStart = azStartFrac * Math.PI * 2;
+  const azEnd   = azEndFrac * Math.PI * 2;
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      tCube: { value: null },
+      vFovRad: { value: VFOV_RAD },
+      elevOffset: { value: ELEV_OFFSET },
+      azStart: { value: azStart },
+      azRange: { value: azEnd - azStart },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      precision highp float;
+      uniform samplerCube tCube;
+      uniform float vFovRad, elevOffset, azStart, azRange;
+      varying vec2 vUv;
+      float dither(vec2 co) {
+        return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+      }
+      void main() {
+        float azimuth = azStart + vUv.x * azRange;
+        float elevation = (vUv.y - 0.5) * vFovRad + elevOffset;
+        float ce = cos(elevation);
+        vec3 dir = vec3(sin(azimuth) * ce, sin(elevation), -cos(azimuth) * ce);
+        vec4 col = textureCube(tCube, dir);
+        col.rgb = col.rgb * 0.97 + 0.015;
+        vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
+        col.rgb = mix(col.rgb, scurve, 0.80);
+        float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+        col.rgb = mix(vec3(luma), col.rgb, 1.28);
+        col.rgb = min(col.rgb, 0.85 + (col.rgb - 0.85) * 0.3);
+        float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
+        col.rgb *= topBottomFade * 0.05 + 0.95;
+        col.rgb += dither(gl_FragCoord.xy) / 255.0;
+        gl_FragColor = col;
+      }
+    `,
+    side: THREE.FrontSide,
+  });
+}
+
+const matWallFront = makeWallProjectionMat(0.0, uF);
+const matWallRight = makeWallProjectionMat(uF, uR);
+const matWallBack  = makeWallProjectionMat(uR, uB);
+const matWallLeft  = makeWallProjectionMat(uB, 1.0);
+
+// ── BUILD ROOM WALLS ──
+const wallFront = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_H), matWallFront);
+wallFront.position.set(0, ROOM_H/2, -ROOM_L/2);
+roomScene.add(wallFront);
+
+const wallRight = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_L, ROOM_H), matWallRight);
+wallRight.rotation.y = -Math.PI/2;
+wallRight.position.set(ROOM_W/2, ROOM_H/2, 0);
+roomScene.add(wallRight);
+
+const wallBack = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_H), matWallBack);
+wallBack.rotation.y = Math.PI;
+wallBack.position.set(0, ROOM_H/2, ROOM_L/2);
+roomScene.add(wallBack);
+
+const wallLeft = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_L, ROOM_H), matWallLeft);
+wallLeft.rotation.y = Math.PI/2;
+wallLeft.position.set(-ROOM_W/2, ROOM_H/2, 0);
+roomScene.add(wallLeft);
+
+// ── ROOM LIGHTING ──
+roomScene.add(new THREE.HemisphereLight(0xc4a882, 0x1a1018, 0.15));
+roomScene.add(new THREE.AmbientLight(0xffffff, 0.1));
+
+// ── WALL LABELS ──
+const labelGroup = new THREE.Group();
+function makeWallLabel(text, position, rotation) {
+  const cvs = document.createElement('canvas');
+  cvs.width = 256; cvs.height = 32;
+  const ctx = cvs.getContext('2d');
+  ctx.font = 'bold 22px monospace';
+  ctx.fillStyle = 'rgba(196, 168, 130, 0.35)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 16);
+  const tex = new THREE.CanvasTexture(cvs);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.2), mat);
+  mesh.position.copy(position);
+  if (rotation) mesh.rotation.y = rotation;
+  return mesh;
+}
+labelGroup.add(makeWallLabel('A (Front)', new THREE.Vector3(0, ROOM_H-0.15, -ROOM_L/2+0.01)));
+labelGroup.add(makeWallLabel('D (Right)', new THREE.Vector3(ROOM_W/2-0.01, ROOM_H-0.15, 0), -Math.PI/2));
+labelGroup.add(makeWallLabel('C (Back)',  new THREE.Vector3(0, ROOM_H-0.15, ROOM_L/2-0.01), Math.PI));
+labelGroup.add(makeWallLabel('B (Left)',  new THREE.Vector3(-ROOM_W/2+0.01, ROOM_H-0.15, 0), Math.PI/2));
+let showLabels = true;
+roomScene.add(labelGroup);
+document.addEventListener('keydown', e => {
+  if (e.key === 'l' || e.key === 'L') { showLabels = !showLabels; labelGroup.visible = showLabels; }
+});
+
+
+// ═══════════════════════════════════════════════════════
+// ANIMATION
+// ═══════════════════════════════════════════════════════
+const br = t => (Math.sin(t*Math.PI*2/BREATH - Math.PI/2)+1)/2;
+let time = 0;
+let fpsFrames = 0, fpsLast = performance.now();
+const fpsEl = document.getElementById('fps');
+
+function updateScene(t, dt) {
+  time = t;
+
+  // Sky rotation + warmth cycle
+  skySphere.rotation.y = (time / 1800) * Math.PI * 2;
+  const warmth = Math.pow((Math.sin((time/1800)*Math.PI*2)+1)/2, 2.0);
+  skyMat.uniforms.uTime.value = time;
+  skyMat.uniforms.uWarmth.value = warmth;
+
+  // Dust
+  dustMat.uniforms.uTime.value = time;
+
+  // Cherry blossom animation
+  const pPos = petalGeo.attributes.position.array;
+  for (let i = 0; i < PETAL_COUNT; i++) {
+    const pd = petalData[i];
+    const angle = pd.phase + time * pd.speed * 0.05;
+    const y = pd.baseY - (time * pd.fallSpeed * 0.3) % 35;
+    const sway = Math.sin(time * 0.5 + pd.phase) * pd.sway;
+    pPos[i*3]   = (pd.radius + sway) * Math.cos(angle);
+    pPos[i*3+1] = y < 2 ? y + 33 : y; // wrap around
+    pPos[i*3+2] = (pd.radius + sway) * Math.sin(angle);
+  }
+  petalGeo.attributes.position.needsUpdate = true;
+
+  // Breathing + colour
+  const b = br(time), hue = (time/CCYCLE)%1;
+  const colT = new THREE.Color().setHSL(hue, 0.2, 0.12 + b*0.06);
+  hemiLight.color.copy(colT).lerp(new THREE.Color(0.6,0.5,0.45), 0.4);
+  hemiLight.intensity = 0.4 + b*0.3;
+  ambLight.color.copy(colT);
+  ambLight.intensity = 0.2 + b*0.12;
+
+  contentScene.fog.color.setHSL(hue, 0.1 + warmth*0.1, 0.05 + warmth*0.05);
+
+  // God rays — stronger in warm phase
+  rayMat.uniforms.uOpacity.value = warmth * 0.5;
+  rays.rotation.y = time * 0.001;
+}
+
+
+// ── LIVE PREVIEW CONTROLS ──
+const scrubDiv = document.createElement('div');
+scrubDiv.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:12px;background:rgba(0,0,0,0.7);padding:12px 24px;border-radius:12px;font-family:monospace;color:#c4a882;font-size:14px;';
+const slider = document.createElement('input');
+slider.type='range';slider.min=0;slider.max=1800;slider.step=1;slider.value=0;
+slider.style.cssText='width:400px;cursor:pointer;';
+const info = document.createElement('span');
+info.style.cssText='min-width:320px;white-space:nowrap;';
+const playBtn = document.createElement('button');
+playBtn.textContent='⏸';playBtn.style.cssText='background:none;border:1px solid #c4a882;color:#c4a882;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:14px;';
+scrubDiv.appendChild(playBtn);scrubDiv.appendChild(slider);scrubDiv.appendChild(info);
+document.body.appendChild(scrubDiv);
+
+let liveT = 0, playing = true, scrubbing = false, timeScale = 1;
+playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? '⏸' : '▶'; };
+slider.oninput = () => { scrubbing = true; liveT = parseFloat(slider.value); };
+slider.onchange = () => { scrubbing = false; };
+document.addEventListener('keydown', e => {
+  if (e.key === 't' || e.key === 'T') {
+    timeScale = timeScale === 1 ? 30 : 1;
+    info.style.color = timeScale > 1 ? '#ff6666' : '#c4a882';
+  }
+});
+
+function animate() {
+  if (playing && !scrubbing) liveT += (1/60) * timeScale;
+  if (liveT > 1800) liveT = 0;
+  if (!scrubbing) slider.value = liveT;
+
+  const dt = (1/60) * timeScale;
+  updateScene(liveT, dt);
+
+  const mins = Math.floor(liveT/60), secs = Math.floor(liveT%60);
+  const warmth = Math.pow((Math.sin((liveT/1800)*Math.PI*2)+1)/2, 2.0);
+  info.textContent = `${mins}:${secs.toString().padStart(2,'0')} / 30:00  ${timeScale>1?'⚡'+timeScale+'x  ':''}warmth=${warmth.toFixed(2)} (${warmth>0.6?'Amber':warmth<0.3?'Ink Wash':'Transition'})`;
+
+  // Render cubemap
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  cubeCamera.update(renderer, contentScene);
+
+  // Update wall projections
+  const cubeTex = cubeRT.texture;
+  matWallFront.uniforms.tCube.value = cubeTex;
+  matWallRight.uniforms.tCube.value = cubeTex;
+  matWallBack.uniforms.tCube.value = cubeTex;
+  matWallLeft.uniforms.tCube.value = cubeTex;
+  floorMat.envMap = cubeTex;
+
+  // Render room
+  controls.update();
+  renderer.render(roomScene, roomCamera);
+
+  // FPS
+  fpsFrames++;
+  const now = performance.now();
+  if (now - fpsLast > 500) {
+    fpsEl.textContent = `${(fpsFrames / ((now-fpsLast)/1000)).toFixed(1)} fps | 水墨山水`;
+    fpsFrames = 0; fpsLast = now;
+  }
+
+  requestAnimationFrame(animate);
+}
+
+window.addEventListener('resize', () => {
+  roomCamera.aspect = window.innerWidth / window.innerHeight;
+  roomCamera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+document.getElementById('loading').classList.add('done');
+requestAnimationFrame(animate);
+
+</script>
+</body>
+</html>
