@@ -190,16 +190,6 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
         col.rgb *= topBottomFade * 0.05 + 0.95;
 
-        // 5. Projector boundary softening — reduce contrast ONLY near overlap seams
-        // Boundaries at UV.x = 0.2229, 0.5000, 0.7771 (projector edges within strip)
-        float bw = 0.015; // softening half-width (~2% of strip = ~100px)
-        float b1 = 1.0 - smoothstep(0.2229 - bw, 0.2229, vUv.x) * (1.0 - smoothstep(0.2229, 0.2229 + bw, vUv.x));
-        float b2 = 1.0 - smoothstep(0.5000 - bw, 0.5000, vUv.x) * (1.0 - smoothstep(0.5000, 0.5000 + bw, vUv.x));
-        float b3 = 1.0 - smoothstep(0.7771 - bw, 0.7771, vUv.x) * (1.0 - smoothstep(0.7771, 0.7771 + bw, vUv.x));
-        float edgeMask = min(b1, min(b2, b3)); // 0 at boundaries, 1 elsewhere
-        float lift = (1.0 - edgeMask) * 0.03; // raise blacks by 3% at seams only
-        col.rgb = col.rgb * (1.0 - lift) + lift;
-
         // Film grain: 1.5/255 dithering — breaks up banding in dark purple gradients
         col.rgb += dither(gl_FragCoord.xy) * 1.5 / 255.0;
         gl_FragColor = col;
@@ -280,13 +270,6 @@ function makeRoomWallMat(azStartFrac, azEndFrac) {
         col.rgb = min(col.rgb, 0.90 + (col.rgb - 0.90) * 0.4);
         float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
         col.rgb *= topBottomFade * 0.05 + 0.95;
-        float bw = 0.015;
-        float b1 = 1.0 - smoothstep(0.2229 - bw, 0.2229, vUv.x) * (1.0 - smoothstep(0.2229, 0.2229 + bw, vUv.x));
-        float b2 = 1.0 - smoothstep(0.5000 - bw, 0.5000, vUv.x) * (1.0 - smoothstep(0.5000, 0.5000 + bw, vUv.x));
-        float b3 = 1.0 - smoothstep(0.7771 - bw, 0.7771, vUv.x) * (1.0 - smoothstep(0.7771, 0.7771 + bw, vUv.x));
-        float edgeMask = min(b1, min(b2, b3));
-        float lift = (1.0 - edgeMask) * 0.03;
-        col.rgb = col.rgb * (1.0 - lift) + lift;
         col.rgb += dither(gl_FragCoord.xy) * 1.5 / 255.0;
         gl_FragColor = col;
       }
