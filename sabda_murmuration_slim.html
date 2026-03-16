@@ -173,11 +173,11 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         // ── PROJECTION OPTIMIZATION (gentle) ──
 
         // 1. Black floor lift — subtle, prevents dark patches in overlap zones
-        col.rgb = col.rgb * 0.95 + 0.025;
+        col.rgb = col.rgb * 0.97 + 0.015;
 
         // 2. Moderate contrast — 50% S-curve (reduced from 80% — room needs brightness)
         vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
-        col.rgb = mix(col.rgb, scurve, 0.40);
+        col.rgb = mix(col.rgb, scurve, 0.50);
 
         // 3. Saturation boost — 45% (vivid without oversaturating)
         float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
@@ -189,6 +189,16 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         // 4. Gentle vignette on vertical edges — helps blend zones
         float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
         col.rgb *= topBottomFade * 0.05 + 0.95;
+
+        // 5. Projector boundary softening — reduce contrast ONLY near overlap seams
+        // Boundaries at UV.x = 0.2229, 0.5000, 0.7771 (projector edges within strip)
+        float bw = 0.015; // softening half-width (~2% of strip = ~100px)
+        float b1 = 1.0 - smoothstep(0.2229 - bw, 0.2229, vUv.x) * (1.0 - smoothstep(0.2229, 0.2229 + bw, vUv.x));
+        float b2 = 1.0 - smoothstep(0.5000 - bw, 0.5000, vUv.x) * (1.0 - smoothstep(0.5000, 0.5000 + bw, vUv.x));
+        float b3 = 1.0 - smoothstep(0.7771 - bw, 0.7771, vUv.x) * (1.0 - smoothstep(0.7771, 0.7771 + bw, vUv.x));
+        float edgeMask = min(b1, min(b2, b3)); // 0 at boundaries, 1 elsewhere
+        float lift = (1.0 - edgeMask) * 0.03; // raise blacks by 3% at seams only
+        col.rgb = col.rgb * (1.0 - lift) + lift;
 
         // Film grain: 1.5/255 dithering — breaks up banding in dark purple gradients
         col.rgb += dither(gl_FragCoord.xy) * 1.5 / 255.0;
@@ -262,14 +272,21 @@ function makeRoomWallMat(azStartFrac, azEndFrac) {
         float ce = cos(elevation);
         vec3 dir = vec3(sin(azimuth) * ce, sin(elevation), -cos(azimuth) * ce);
         vec4 col = textureCube(tCube, dir);
-        col.rgb = col.rgb * 0.95 + 0.025;
+        col.rgb = col.rgb * 0.97 + 0.015;
         vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
-        col.rgb = mix(col.rgb, scurve, 0.40);
+        col.rgb = mix(col.rgb, scurve, 0.50);
         float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
         col.rgb = mix(vec3(luma), col.rgb, 1.30);
         col.rgb = min(col.rgb, 0.90 + (col.rgb - 0.90) * 0.4);
         float topBottomFade = smoothstep(0.0, 0.02, vUv.y) * smoothstep(1.0, 0.98, vUv.y);
         col.rgb *= topBottomFade * 0.05 + 0.95;
+        float bw = 0.015;
+        float b1 = 1.0 - smoothstep(0.2229 - bw, 0.2229, vUv.x) * (1.0 - smoothstep(0.2229, 0.2229 + bw, vUv.x));
+        float b2 = 1.0 - smoothstep(0.5000 - bw, 0.5000, vUv.x) * (1.0 - smoothstep(0.5000, 0.5000 + bw, vUv.x));
+        float b3 = 1.0 - smoothstep(0.7771 - bw, 0.7771, vUv.x) * (1.0 - smoothstep(0.7771, 0.7771 + bw, vUv.x));
+        float edgeMask = min(b1, min(b2, b3));
+        float lift = (1.0 - edgeMask) * 0.03;
+        col.rgb = col.rgb * (1.0 - lift) + lift;
         col.rgb += dither(gl_FragCoord.xy) * 1.5 / 255.0;
         gl_FragColor = col;
       }
