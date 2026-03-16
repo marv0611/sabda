@@ -19,8 +19,8 @@ const MODE = process.argv[2] === 'full' ? 'full' : 'preview';
 const FPS = 30;
 const DURATION_SEC = 1800;           // 30 minutes (one warmth cycle)
 const PREVIEW_SPEED = 30;            // 30× speed for preview
-const JPEG_QUALITY = 0.98;
-const CRF = '14';
+const JPEG_QUALITY = 1.0;
+const CRF = '10';
 const PRESET_WALLS = 'medium';
 const PRESET_MERGE = 'slow';
 

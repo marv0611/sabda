@@ -110,7 +110,7 @@ document.body.appendChild(renderer.domElement);
 // ═══════════════════════════════════════════════════════
 const contentScene = new THREE.Scene();
 
-const CUBE_SIZE = 4096;
+const CUBE_SIZE = 8192;
 const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
   generateMipmaps: false,
   minFilter: THREE.LinearFilter,
@@ -1037,8 +1037,8 @@ const BH_Z0 = Math.sin(BH_EVENTS[0].angle) * BH_EVENTS[0].dist;
 
 // 10-color palette: reduced red/orange, added deep blue + light blue
 // "Up" movie palette — 5 colors, assigned uniformly (no two same colors adjacent)
-// "Up" palette + extra blues: magenta, cyan, green, lime, orange, sky blue, deep blue
-const BH_COLORS = [0xEE05F2, 0x05DBF2, 0x37A603, 0xD8F279, 0xF27507, 0x3B9FE8, 0x1565C0];
+// Pastel palette — soft dreamy tones (original "Up" colors mixed 55% toward white)
+const BH_COLORS = [0xF78EF9, 0x8EEEF9, 0xA5D68D, 0xEDF9C2, 0xF9C08F, 0xA6D3F4, 0x95B9E2];
 // magenta, cyan, green, lime, orange
 
 const balloonGroup = new THREE.Group();
