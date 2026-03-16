@@ -2634,8 +2634,53 @@ Duplicate `const` declarations in JS modules cause an immediate silent crash —
 - **Revert immediately when asked** — don't salvage a failed approach.
 - **One task per commit** — don't bundle position + color + performance changes.
 
+### 30.12 Never Bake Projector Edge Blending Into Content
+
+Attempted twice, failed twice:
+- **Localized boundary softening** (lifting blacks in narrow bands at projector seam positions) creates visible bright vertical lines in the content — worse than the original seam.
+- **Lesson**: projector edge blending is Watchout's job (Display > Soft Edge). Content should be continuous and uniform. Any brightness modification baked into the content becomes a permanent artifact visible in all viewing conditions.
+- The only content-side approach that helps is **global** contrast softening (gentler S-curve, raised black floor) — this makes the content more forgiving of imperfect blending without creating new artifacts. Trade-off: slightly less punchy image, offset by 8K cubemap sharpness.
+
+### 30.13 Cubemap Resolution vs. Contrast Are Independent
+
+- **Cubemap resolution** (4K vs 8K) controls sharpness — edges, textures, object detail.
+- **Contrast/S-curve** controls tonal range — how dark the darks are, how steep transitions are.
+- These are completely independent. Increasing cubemap to 8K while softening contrast gives: sharper details + gentler transitions. The sharpness gain offsets the contrast reduction.
+- For projected immersive environments, this combination is ideal — sharp objects with soft light transitions that hide projector overlap seams.
+
+### 30.14 Cubemap Sizing — Match Your Source Textures
+
+- If the sky texture is 8192×4096, a 4K cubemap downsamples it and wastes detail. Match the cubemap to the largest source texture.
+- 8K cubemap is the practical maximum for production renders (offline, frame-by-frame). For live preview, drop to 4K to maintain frame rate.
+- Use `window.__SABDA_PUPPETEER__ ? 8192 : 4096` to automatically switch between render and preview quality.
+
+### 30.15 CRF Quality — Don't Overthink It
+
+- CRF 10, 12, and 14 are visually indistinguishable for projected content at viewing distance.
+- CRF 14 is the sweet spot: high quality, reasonable file size, validated on projectors.
+- CRF affects file size, not pixel density. The cubemap resolution is what determines sharpness.
+- Don't increase file size 2× for an imperceptible quality difference.
+
+### 30.16 Watchout Positioning — Do the Math
+
+- Content position = `(stage_width - content_width) / 2` for horizontal centering. Verify this arithmetic — a wrong offset creates a persistent 2-3% misfit that's subtle but visible.
+- If content height matches projector row height exactly (e.g., 1200px = 1200px), Y position should be 0 for top row and row_height for bottom row — no gap, no offset.
+- Always verify positions with a calculator, not by eyeballing in the stage editor.
+
+### 30.17 Name-Based Node Filtering — Be Exact
+
+- Hiding GLB nodes by substring match (e.g., `name.includes('dummy')`) can accidentally hide critical parent nodes. Saturn's root node was `Saturn_Dummy` — hiding everything with "dummy" killed the entire planet.
+- **Always inspect the full node hierarchy** before writing name filters. Use `pygltflib` or similar to list all nodes with names, parents, and children.
+- Filter by the most specific name possible (e.g., `Mimas_Dummy1`, not `dummy`).
+
+### 30.18 Loop Seam — Integer Rotations Only
+
+- Any object that rotates during the loop must complete an exact integer number of rotations in the loop duration. `9.9 × 2π` in 1800s leaves the logo 0.9 rotations off at the loop point.
+- Always round to the nearest integer: `10 × 2π` = exact alignment at t=0 and t=1800.
+- Check every rotating element (planets, Saturn, logos, symbols) — each must independently satisfy this rule.
+
 ---
 
-*Manual v12.4 — March 2026*
+*Manual v12.5 — March 2026*
 *Standard: 10/10 or nothing.*
 *Rule #1: Look before you deliver.*
