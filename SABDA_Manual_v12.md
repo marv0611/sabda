@@ -940,8 +940,8 @@ From the v3 visual audit: subtle effects compound. When you reduce glow, emissiv
 | Projectors | 8 (2 rows × 4) |
 | Each projector | 1920×1200 |
 | Content size | 6928×2400 (2 strips of 6928×1200) |
-| Top strip position | X=92, Y=40 |
-| Bottom strip position | X=92, Y=1506 |
+| Top strip position | X=376, Y=0 |
+| Bottom strip position | X=376, Y=1200 |
 | Top strip content | Left wall (5008) + Front wall (1920) |
 | Bottom strip content | Right wall (5008) + Back wall (1920) |
 
@@ -1448,10 +1448,10 @@ X=92
 
 | Media | Position | Size |
 |-------|----------|------|
-| sabda_top.mp4 | X=92, Y=40 | 6928×1200 |
-| sabda_bottom.mp4 | X=92, Y=1506 | 6928×1200 |
+| sabda_top.mp4 | X=376, Y=0 | 6928×1200 |
+| sabda_bottom.mp4 | X=376, Y=1200 | 6928×1200 |
 
-The X=92 offset centres the 6928-wide content within the 7680-wide stage. The Y positions place each strip at the correct row of projectors with a 266px gap between rows (accounting for projector bezels/overlap).
+The X=376 offset centres the 6928-wide content within the 7680-wide stage: (7680 - 6928) / 2 = 376. Each strip is 1200px tall, matching the projector row height exactly — Y=0 for top row, Y=1200 for bottom row, no gap.
 
 ### Projector Mapping
 
@@ -1471,8 +1471,8 @@ The 30-minute video covers exactly one full sky warmth cycle (1800 seconds). For
 
 1. Import `sabda_top.mp4` and `sabda_bottom.mp4` as media
 2. Add both to the timeline at the same start time
-3. Position top strip at X=92, Y=40
-4. Position bottom strip at X=92, Y=1506
+3. Position top strip at X=376, Y=0
+4. Position bottom strip at X=376, Y=1200
 5. Set both to loop (timeline duration = class duration)
 6. Test on all 8 projectors — verify wall boundaries align with physical corners
 
