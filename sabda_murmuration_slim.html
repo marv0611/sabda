@@ -173,11 +173,11 @@ function makeEquirectMat(azStartFrac, azEndFrac) {
         // ── PROJECTION OPTIMIZATION (gentle) ──
 
         // 1. Black floor lift — subtle, prevents dark patches in overlap zones
-        col.rgb = col.rgb * 0.95 + 0.025;
+        col.rgb = col.rgb * 0.93 + 0.035;
 
         // 2. Moderate contrast — 50% S-curve (reduced from 80% — room needs brightness)
         vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
-        col.rgb = mix(col.rgb, scurve, 0.40);
+        col.rgb = mix(col.rgb, scurve, 0.25);
 
         // 3. Saturation boost — 45% (vivid without oversaturating)
         float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
@@ -262,9 +262,9 @@ function makeRoomWallMat(azStartFrac, azEndFrac) {
         float ce = cos(elevation);
         vec3 dir = vec3(sin(azimuth) * ce, sin(elevation), -cos(azimuth) * ce);
         vec4 col = textureCube(tCube, dir);
-        col.rgb = col.rgb * 0.95 + 0.025;
+        col.rgb = col.rgb * 0.93 + 0.035;
         vec3 scurve = col.rgb * col.rgb * (3.0 - 2.0 * col.rgb);
-        col.rgb = mix(col.rgb, scurve, 0.40);
+        col.rgb = mix(col.rgb, scurve, 0.25);
         float luma = dot(col.rgb, vec3(0.299, 0.587, 0.114));
         col.rgb = mix(vec3(luma), col.rgb, 1.30);
         col.rgb = min(col.rgb, 0.90 + (col.rgb - 0.90) * 0.4);
@@ -1626,10 +1626,7 @@ window.SABDA_RENDER_FRAME = function(simTime, speedMultiplier) {
       bd.vy = 0;
     }
 
-    // Scale: distance-compensated only — no fading, no shrinking
-    const rawDistScale = BIRD_REF_DIST / Math.max(15, dist);
-    const distScale = 0.7 + 0.3 * rawDistScale;
-    bd.ctr.scale.setScalar(distScale);
+    // Fixed scale — cubemap perspective handles apparent size naturally
     bd.ctr.visible = true;  // ALWAYS visible — never pop in or out
 
     // Gentle altitude float
