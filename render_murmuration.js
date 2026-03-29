@@ -32,10 +32,10 @@ const OUTPUT_DIR = path.resolve(__dirname, 'output');
 
 // Wall definitions: name, width, height
 const WALLS = [
-  { name: 'left',  w: 5037, h: 1200 },
-  { name: 'front', w: 1891, h: 1200 },
-  { name: 'right', w: 5037, h: 1200 },
-  { name: 'back',  w: 1891, h: 1200 },
+  { name: 'left',  w: 5038, h: 1200 },
+  { name: 'front', w: 1890, h: 1200 },
+  { name: 'right', w: 5038, h: 1200 },
+  { name: 'back',  w: 1890, h: 1200 },
 ];
 
 console.log(`\n═══ SABDA Renderer ═══`);
