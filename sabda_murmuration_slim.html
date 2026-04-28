@@ -127,7 +127,7 @@ contentScene.add(cubeCamera);
 const VFOV_RAD = 62.5 * Math.PI / 180.0;
 const ELEV_OFFSET = 3.0 * Math.PI / 180.0;
 
-const SS = window.__SABDA_PUPPETEER__ ? 2 : 1;  // 2× supersampling for render
+const SS = 1;  // No supersampling (was killing render perf)
 function makeWallRT(w, h) {
   return new THREE.WebGLRenderTarget(w * SS, h * SS, {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
