@@ -95,7 +95,7 @@ const EYE_H = 1.6;
 // RENDERER
 // ═══════════════════════════════════════════════════════
 const renderer = new THREE.WebGLRenderer({
-  antialias: !!window.__SABDA_PUPPETEER__,  // AA for render, off for preview performance
+  antialias: false,
   powerPreference: 'high-performance',
 });
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -110,7 +110,7 @@ document.body.appendChild(renderer.domElement);
 // ═══════════════════════════════════════════════════════
 const contentScene = new THREE.Scene();
 
-const CUBE_SIZE = window.__SABDA_PUPPETEER__ ? 8192 : 4096;
+const CUBE_SIZE = window.__SABDA_PUPPETEER__ ? 6144 : 4096;
 const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
   generateMipmaps: false,
   minFilter: THREE.LinearFilter,
