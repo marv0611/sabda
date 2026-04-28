@@ -16,10 +16,10 @@ const ROOM_W = 5.63;    // short walls (Front A / Back C) in meters
 const PERIM = 2 * ROOM_L + 2 * ROOM_W;  // 41.26m
 
 // Wall pixel widths — UNIFORM px/degree (38.49 px/°)
-const W_LEFT   = 5037, H_WALL = 1200;
-const W_RIGHT  = 5037;
-const W_FRONT  = 1891;
-const W_BACK   = 1891;
+const W_LEFT   = 5038, H_WALL = 1200;
+const W_RIGHT  = 5038;
+const W_FRONT  = 1890;
+const W_BACK   = 1890;
 const OUT_W = W_LEFT + W_FRONT;   // 6928
 const OUT_H = H_WALL * 2;         // 2400
 
@@ -87,10 +87,10 @@ Uses `performance.now()` for real-time tracking (not frame-count based).
 const JPEG_QUALITY = 1.0;
 const CRF = '14';
 const WALLS = [
-  { name: 'left',  w: 5037, h: 1200 },
-  { name: 'front', w: 1891, h: 1200 },
-  { name: 'right', w: 5037, h: 1200 },
-  { name: 'back',  w: 1891, h: 1200 },
+  { name: 'left',  w: 5038, h: 1200 },
+  { name: 'front', w: 1890, h: 1200 },
+  { name: 'right', w: 5038, h: 1200 },
+  { name: 'back',  w: 1890, h: 1200 },
 ];
 ```
 

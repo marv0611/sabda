@@ -110,7 +110,7 @@ document.body.appendChild(renderer.domElement);
 // ═══════════════════════════════════════════════════════
 const contentScene = new THREE.Scene();
 
-const CUBE_SIZE = window.__SABDA_PUPPETEER__ ? 6144 : 4096;
+const CUBE_SIZE = window.__SABDA_PUPPETEER__ ? 8192 : 4096;
 const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
   generateMipmaps: false,
   minFilter: THREE.LinearFilter,
@@ -127,8 +127,9 @@ contentScene.add(cubeCamera);
 const VFOV_RAD = 62.5 * Math.PI / 180.0;
 const ELEV_OFFSET = 3.0 * Math.PI / 180.0;
 
+const SS = window.__SABDA_PUPPETEER__ ? 2 : 1;  // 2× supersampling for render
 function makeWallRT(w, h) {
-  return new THREE.WebGLRenderTarget(w, h, {
+  return new THREE.WebGLRenderTarget(w * SS, h * SS, {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     colorSpace: THREE.SRGBColorSpace,
   });
@@ -1222,6 +1223,7 @@ loader.load(houseUrl, gltf => {
         c.material.transparent = true;
         c.material.emissive = new THREE.Color(0x201008);
         c.material.emissiveIntensity = 0.15;
+        if (c.material.map) { c.material.map.anisotropy = renderer.capabilities.getMaxAnisotropy(); c.material.map.minFilter = THREE.LinearMipmapLinearFilter; }
       }
     }
   });
@@ -1324,7 +1326,7 @@ loader.load(lanternUrl, gltf => {
     lantern.traverse(c => {
       if (c.isMesh) {
         c.material = c.material.clone();
-        if (c.material.map) c.material.map.anisotropy = 4;
+        if (c.material.map) { c.material.map.anisotropy = renderer.capabilities.getMaxAnisotropy(); c.material.map.minFilter = THREE.LinearMipmapLinearFilter; }
       }
     });
 
