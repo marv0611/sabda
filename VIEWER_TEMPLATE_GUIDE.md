@@ -85,7 +85,7 @@ Uses `performance.now()` for real-time tracking (not frame-count based).
 ## Render Script (render_SCENENAME.js)
 ```javascript
 const JPEG_QUALITY = 1.0;
-const CRF = '14';
+const CRF = '12';
 const WALLS = [
   { name: 'left',  w: 5038, h: 1200 },
   { name: 'front', w: 1890, h: 1200 },

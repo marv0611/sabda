@@ -95,7 +95,7 @@ const EYE_H = 1.6;
 // RENDERER
 // ═══════════════════════════════════════════════════════
 const renderer = new THREE.WebGLRenderer({
-  antialias: false,
+  antialias: !!window.__SABDA_PUPPETEER__,  // AA for render, off for preview performance
   powerPreference: 'high-performance',
 });
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
