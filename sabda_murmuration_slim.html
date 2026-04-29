@@ -95,7 +95,7 @@ const EYE_H = 1.6;
 // RENDERER
 // ═══════════════════════════════════════════════════════
 const renderer = new THREE.WebGLRenderer({
-  antialias: false,
+  antialias: !!window.__SABDA_PUPPETEER__,  // AA for render only, off for preview
   powerPreference: 'high-performance',
 });
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -110,7 +110,7 @@ document.body.appendChild(renderer.domElement);
 // ═══════════════════════════════════════════════════════
 const contentScene = new THREE.Scene();
 
-const CUBE_SIZE = 4096;
+const CUBE_SIZE = window.__SABDA_PUPPETEER__ ? 8192 : 4096;
 const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
   generateMipmaps: false,
   minFilter: THREE.LinearFilter,
@@ -1138,9 +1138,11 @@ loader.load(balloonGlbUrl, gltf => {
       const col = base.clone().multiplyScalar(darken);
       bhMats.push(new THREE.MeshStandardMaterial({
         color: col,
-        roughness: 0.28,
-        metalness: 0.02,
+        roughness: 0.18,        // smoother for cleaner highlights (was 0.28)
+        metalness: 0.05,        // slight metallic for nicer reflections (was 0.02)
         emissive: col.clone().multiplyScalar(0.10),
+        envMap: skyTexA,        // sky reflection on balloon surface
+        envMapIntensity: 0.4,   // subtle reflection
       }));
     }
   }
