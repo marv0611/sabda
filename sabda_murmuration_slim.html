@@ -110,7 +110,7 @@ document.body.appendChild(renderer.domElement);
 // ═══════════════════════════════════════════════════════
 const contentScene = new THREE.Scene();
 
-const CUBE_SIZE = 4096;
+const CUBE_SIZE = window.__SABDA_PUPPETEER__ ? 8192 : 4096;
 const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
   generateMipmaps: false,
   minFilter: THREE.LinearFilter,
