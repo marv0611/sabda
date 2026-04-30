@@ -20,8 +20,8 @@ const FPS = 30;
 const DURATION_SEC = 1800;           // 30 minutes (one warmth cycle)
 const PREVIEW_SPEED = 30;            // 30× speed for preview
 const JPEG_QUALITY = 1.0;
-const CRF = '12';
-const PRESET_WALLS = 'slow';
+const CRF = '14';
+const PRESET_WALLS = 'medium';
 const PRESET_MERGE = 'slow';
 
 const TOTAL_FRAMES = MODE === 'full' ? DURATION_SEC * FPS : DURATION_SEC * FPS / PREVIEW_SPEED;

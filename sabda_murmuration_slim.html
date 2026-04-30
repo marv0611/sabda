@@ -95,7 +95,7 @@ const EYE_H = 1.6;
 // RENDERER
 // ═══════════════════════════════════════════════════════
 const renderer = new THREE.WebGLRenderer({
-  antialias: !!window.__SABDA_PUPPETEER__,  // AA for render only, off for preview
+  antialias: false,
   powerPreference: 'high-performance',
 });
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -110,7 +110,7 @@ document.body.appendChild(renderer.domElement);
 // ═══════════════════════════════════════════════════════
 const contentScene = new THREE.Scene();
 
-const CUBE_SIZE = window.__SABDA_PUPPETEER__ ? 8192 : 4096;
+const CUBE_SIZE = 4096;
 const cubeRT = new THREE.WebGLCubeRenderTarget(CUBE_SIZE, {
   generateMipmaps: false,
   minFilter: THREE.LinearFilter,
@@ -127,7 +127,7 @@ contentScene.add(cubeCamera);
 const VFOV_RAD = 62.5 * Math.PI / 180.0;
 const ELEV_OFFSET = 3.0 * Math.PI / 180.0;
 
-const SS = window.__SABDA_PUPPETEER__ ? 1.5 : 1;  // 1.5× supersampling for render only
+const SS = 1;  // No supersampling
 function makeWallRT(w, h) {
   return new THREE.WebGLRenderTarget(Math.round(w * SS), Math.round(h * SS), {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
