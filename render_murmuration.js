@@ -83,6 +83,7 @@ async function main() {
 
   // Launch browser
   console.log('Launching browser...');
+  const isWindows = process.platform === 'win32';
   const browser = await puppeteer.launch({
     headless: 'new',
     args: [
@@ -90,7 +91,7 @@ async function main() {
       '--enable-webgl',
       '--enable-gpu',
       '--use-gl=angle',
-      '--use-angle=metal',
+      isWindows ? '--use-angle=d3d11' : '--use-angle=metal',
       '--ignore-gpu-blocklist',
       '--enable-features=Vulkan,UseSkiaRenderer',
       `--window-size=6928,2400`,
