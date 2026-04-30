@@ -6,7 +6,7 @@ slim = 'sabda_murmuration_slim.html'
 assets_dir = 'assets_evening'
 output = 'sabda_murmuration_full.html'
 
-with open(slim, 'r') as f:
+with open(slim, 'r', encoding='utf-8') as f:
     html = f.read()
 
 for aid in ['skydata', 'skydata_b', 'birdsdata', 'planetdata', 'saturndata', 'balloonhousedata', 'balloonglbdata', 'sabdasymboldata', 'lanterndata']:
@@ -31,7 +31,7 @@ for aid in ['skydata', 'skydata_b', 'birdsdata', 'planetdata', 'saturndata', 'ba
     html = html.replace(placeholder, replacement)
     print(f"  Injected {aid}: {len(b64)/1024/1024:.1f}MB")
 
-with open(output, 'w') as f:
+with open(output, 'w', encoding='utf-8') as f:
     f.write(html)
 
 print(f"\nAssembled: {os.path.getsize(output)/1024/1024:.1f}MB -> {output}")
