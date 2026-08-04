@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>SABDA — Shooting Stars Demo</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+<script type="importmap">{"imports":{
+  "three":"https://unpkg.com/three@0.162.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.162.0/examples/jsm/"
+}}</script>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+
+// ── SETUP ──
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+camera.position.set(0, 0, 0);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── STARFIELD DOME ──
+const STAR_COUNT = 3000;
+const starGeo = new THREE.BufferGeometry();
+const starPos = new Float32Array(STAR_COUNT * 3);
+const starSizes = new Float32Array(STAR_COUNT);
+const starColors = new Float32Array(STAR_COUNT * 3);
+for (let i = 0; i < STAR_COUNT; i++) {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  const r = 380;
+  starPos[i*3]   = Math.sin(phi) * Math.cos(theta) * r;
+  starPos[i*3+1] = Math.sin(phi) * Math.sin(theta) * r;
+  starPos[i*3+2] = Math.cos(phi) * r;
+  starSizes[i] = 1.0 + Math.random() * 3.0;
+  // Warm white to cool blue star colors
+  const temp = Math.random();
+  starColors[i*3]   = 0.85 + temp * 0.15;
+  starColors[i*3+1] = 0.85 + temp * 0.1;
+  starColors[i*3+2] = 0.9 + temp * 0.1;
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+const starMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false,
+  vertexShader: `
+    attribute float size;
+    attribute vec3 color;
+    varying vec3 vColor;
+    varying float vSize;
+    void main() {
+      vColor = color;
+      vSize = size;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = size * (300.0 / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vColor;
+    varying float vSize;
+    void main() {
+      float d = length(gl_PointCoord - 0.5) * 2.0;
+      float core = exp(-d * d * 8.0);
+      float glow = exp(-d * d * 2.0) * 0.3;
+      float alpha = core + glow;
+      gl_FragColor = vec4(vColor, alpha * 0.7);
+    }
+  `,
+});
+const stars = new THREE.Points(starGeo, starMat);
+scene.add(stars);
+
+// ── SKY GRADIENT DOME ──
+const skyGeo = new THREE.SphereGeometry(390, 32, 32);
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false,
+  vertexShader: `
+    varying vec3 vWorldPos;
+    void main() {
+      vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vWorldPos;
+    void main() {
+      float y = normalize(vWorldPos).y;
+      // Deep night sky gradient
+      vec3 zenith = vec3(0.02, 0.02, 0.06);
+      vec3 horizon = vec3(0.05, 0.04, 0.08);
+      vec3 below = vec3(0.01, 0.01, 0.02);
+      vec3 col;
+      if (y > 0.0) {
+        col = mix(horizon, zenith, smoothstep(0.0, 0.6, y));
+      } else {
+        col = mix(horizon, below, smoothstep(0.0, -0.3, y));
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+scene.add(new THREE.Mesh(skyGeo, skyMat));
+
+// ── SHOOTING STAR SYSTEM (supports multiple simultaneous) ──
+const MAX_STARS = 8;
+const SS_SEGMENTS = 14;
+const DOME_R = 340;
+
+function createShootingStar() {
+  const geo = new THREE.BufferGeometry();
+  const verts = new Float32Array((SS_SEGMENTS + 1) * 2 * 3);
+  const uvs = new Float32Array((SS_SEGMENTS + 1) * 2 * 2);
+  const indices = [];
+  for (let i = 0; i <= SS_SEGMENTS; i++) {
+    const t = i / SS_SEGMENTS;
+    uvs[i*4] = 0; uvs[i*4+1] = t;
+    uvs[i*4+2] = 1; uvs[i*4+3] = t;
+    if (i < SS_SEGMENTS) {
+      const b = i * 2;
+      indices.push(b, b+1, b+2, b+1, b+3, b+2);
+    }
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+    uniforms: {
+      uOpacity: { value: 1.0 },
+      uColor: { value: new THREE.Color(1, 0.98, 0.9) },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+    `,
+    fragmentShader: `
+      precision highp float;
+      uniform float uOpacity;
+      uniform vec3 uColor;
+      varying vec2 vUv;
+      void main() {
+        float headGlow = pow(vUv.y, 2.5);
+        float cx = abs(vUv.x - 0.5) * 2.0;
+        float core = pow(max(0.0, 1.0 - cx), 6.0);
+        float glow = pow(max(0.0, 1.0 - cx), 1.8) * 0.25;
+        float centerLine = core + glow;
+        float headBoost = smoothstep(0.88, 1.0, vUv.y) * 0.7;
+        float alpha = headGlow * centerLine * uOpacity + headBoost * uOpacity * core;
+        gl_FragColor = vec4(uColor, clamp(alpha, 0.0, 1.0));
+      }
+    `,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.visible = false; mesh.frustumCulled = false;
+  scene.add(mesh);
+  return {
+    mesh, geo, mat,
+    active: false,
+    pos: new THREE.Vector3(),
+    vel: new THREE.Vector3(),
+    life: 0, maxLife: 0, tailBonus: 0,
+  };
+}
+
+const shootingStars = [];
+for (let i = 0; i < MAX_STARS; i++) shootingStars.push(createShootingStar());
+
+let spawnInterval = 1.0; // seconds between spawns
+let spawnTimer = 0.5;    // start quickly
+
+const _velDir = new THREE.Vector3();
+const _segPos = new THREE.Vector3();
+
+function spawnStar() {
+  // Find an inactive slot
+  const ss = shootingStars.find(s => !s.active);
+  if (!ss) return;
+
+  ss.active = true;
+  // Vary tail length: short (80-150) vs long (250-500)
+  const isLong = Math.random() < 0.4;
+  ss.tailBonus = isLong ? (250 + Math.random() * 250) : (80 + Math.random() * 100);
+  ss.maxLife = isLong ? (2.5 + Math.random() * 2.0) : (1.0 + Math.random() * 1.5);
+  ss.life = ss.maxLife;
+
+  // Spawn in upper sky
+  const sTheta = Math.random() * Math.PI * 2;
+  const sElev = (20 + Math.random() * 40) * Math.PI / 180;
+  ss.pos.set(
+    Math.cos(sElev) * Math.cos(sTheta) * DOME_R,
+    Math.sin(sElev) * DOME_R,
+    Math.cos(sElev) * Math.sin(sTheta) * DOME_R
+  );
+
+  // Steep descent
+  const entryAngle = (10 + Math.random() * 25) * Math.PI / 180;
+  const travelTheta = sTheta + 0.3 + Math.random() * 2.0;
+  const speed = 120 + Math.random() * 140;
+  ss.vel.set(
+    Math.cos(travelTheta) * Math.cos(entryAngle) * speed,
+    -Math.sin(entryAngle) * speed,
+    Math.sin(travelTheta) * Math.cos(entryAngle) * speed
+  );
+
+  ss.mesh.visible = true;
+}
+
+function updateStar(ss, dt) {
+  if (!ss.active) return;
+  ss.life -= dt;
+  const progress = 1 - ss.life / ss.maxLife;
+  let opacity;
+  if (progress < 0.05) opacity = progress / 0.05;
+  else if (progress < 0.6) opacity = 1.0;
+  else opacity = Math.pow((1 - progress) / 0.4, 0.7);
+  opacity = Math.max(0, opacity);
+
+  ss.pos.addScaledVector(ss.vel, dt);
+  ss.pos.normalize().multiplyScalar(DOME_R);
+
+  const tailAngle = 0.65 + ss.tailBonus * 0.003;
+  _velDir.copy(ss.vel).normalize();
+  const p = ss.geo.attributes.position.array;
+  const hw = 1.5;
+  for (let i = 0; i <= SS_SEGMENTS; i++) {
+    const t = i / SS_SEGMENTS;
+    const stepBack = tailAngle * (1 - t);
+    _segPos.copy(ss.pos).addScaledVector(_velDir, -stepBack * DOME_R);
+    _segPos.normalize().multiplyScalar(DOME_R);
+    const px = _segPos.x, py = _segPos.y, pz = _segPos.z;
+    const radLen = Math.sqrt(px*px + py*py + pz*pz);
+    const rx = px/radLen, ry = py/radLen, rz = pz/radLen;
+    let sx = _velDir.y*rz - _velDir.z*ry;
+    let sy = _velDir.z*rx - _velDir.x*rz;
+    let sz = _velDir.x*ry - _velDir.y*rx;
+    const sLen = Math.sqrt(sx*sx + sy*sy + sz*sz) || 1;
+    sx /= sLen; sy /= sLen; sz /= sLen;
+    const idx = i * 2 * 3;
+    p[idx]   = px + sx * hw; p[idx+1] = py + sy * hw; p[idx+2] = pz + sz * hw;
+    p[idx+3] = px - sx * hw; p[idx+4] = py - sy * hw; p[idx+5] = pz - sz * hw;
+  }
+  ss.geo.attributes.position.needsUpdate = true;
+  ss.mesh.position.set(0, 0, 0);
+  ss.mesh.rotation.set(0, 0, 0);
+  ss.mesh.scale.set(1, 1, 1);
+  ss.mat.uniforms.uOpacity.value = opacity;
+  ss.mat.uniforms.uColor.value.setRGB(1, 0.97 - progress * 0.05, 0.92 - progress * 0.1);
+
+  if (ss.life <= 0) { ss.active = false; ss.mesh.visible = false; }
+}
+
+// ── SLOW CAMERA DRIFT ──
+let camTheta = 0, camPhi = 0.3;
+
+// ── CONTROLS UI ──
+const controlDiv = document.createElement('div');
+controlDiv.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:16px;background:rgba(0,0,0,0.7);padding:20px 36px;border-radius:12px;font-family:monospace;';
+const btnStyle = (active) => `background:${active?'#c4a882':'none'};border:2px solid #c4a882;color:${active?'#000':'#c4a882'};padding:12px 32px;border-radius:8px;cursor:pointer;font-size:36px;font-family:monospace;font-weight:bold;`;
+
+const label = document.createElement('span');
+label.textContent = 'INTERVAL:';
+label.style.cssText = 'color:#c4a882;font-size:28px;margin-right:8px;';
+controlDiv.appendChild(label);
+
+const intervals = [0.5, 1, 2];
+const intervalLabels = ['0.5s', '1s', '2s'];
+const btns = [];
+function updateBtns() { btns.forEach((b, i) => { b.style.cssText = btnStyle(spawnInterval === intervals[i]); }); }
+intervals.forEach((iv, i) => {
+  const b = document.createElement('button');
+  b.textContent = intervalLabels[i];
+  b.onclick = () => { spawnInterval = iv; updateBtns(); };
+  btns.push(b);
+  controlDiv.appendChild(b);
+});
+
+// Separator
+const sep = document.createElement('span');
+sep.textContent = '  ';
+sep.style.cssText = 'width:30px;';
+controlDiv.appendChild(sep);
+
+// Count display
+const countDisplay = document.createElement('span');
+countDisplay.style.cssText = 'color:#c4a882;font-size:28px;min-width:200px;';
+controlDiv.appendChild(countDisplay);
+
+document.body.appendChild(controlDiv);
+updateBtns();
+
+// ── SABDA WATERMARK ──
+const watermark = document.createElement('div');
+watermark.textContent = 'SABDA';
+watermark.style.cssText = 'position:fixed;top:30px;left:50%;transform:translateX(-50%);color:rgba(196,168,130,0.3);font-family:monospace;font-size:48px;letter-spacing:12px;z-index:100;';
+document.body.appendChild(watermark);
+
+// ── ANIMATION LOOP ──
+let lastTime = performance.now() / 1000;
+let totalActive = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now() / 1000;
+  const dt = Math.min(now - lastTime, 0.1);
+  lastTime = now;
+
+  // Slow camera drift
+  camTheta += dt * 0.015;
+  camPhi = 0.25 + Math.sin(now * 0.05) * 0.1;
+  camera.lookAt(
+    Math.cos(camPhi) * Math.cos(camTheta) * 100,
+    Math.sin(camPhi) * 100,
+    Math.cos(camPhi) * Math.sin(camTheta) * 100
+  );
+
+  // Twinkle stars
+  const sizes = starGeo.attributes.size.array;
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const base = 1.0 + (i % 7) * 0.4;
+    sizes[i] = base + Math.sin(now * (1.5 + (i % 11) * 0.3) + i * 0.7) * 0.5;
+  }
+  starGeo.attributes.size.needsUpdate = true;
+
+  // Spawn shooting stars
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnStar();
+    spawnTimer = spawnInterval * (0.7 + Math.random() * 0.6); // slight randomness
+  }
+
+  // Update all shooting stars
+  totalActive = 0;
+  for (const ss of shootingStars) {
+    updateStar(ss, dt);
+    if (ss.active) totalActive++;
+  }
+
+  countDisplay.textContent = `active: ${totalActive}`;
+
+  renderer.render(scene, camera);
+}
+
+animate();
+</script>
+</body></html>
