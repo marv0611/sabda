@@ -145,8 +145,8 @@ function spawnStar() {
   ss.active = true;
 
   const isLong = Math.random() < 0.55;
-  ss.tailLen = isLong ? (140 + Math.random() * 180) : (40 + Math.random() * 50);
-  ss.maxLife = isLong ? (3.0 + Math.random() * 2.5) : (1.2 + Math.random() * 1.0);
+  ss.tailLen = isLong ? (200 + Math.random() * 280) : (55 + Math.random() * 65);
+  ss.maxLife = isLong ? (3.5 + Math.random() * 3.5) : (1.5 + Math.random() * 1.3);
   ss.life = ss.maxLife;
 
   // Spawn on a sphere at R=340, upper hemisphere only (elevation 20-60°)
