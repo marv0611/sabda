@@ -1751,23 +1751,34 @@ if (!window.__SABDA_PUPPETEER__) {
   const playBtn = document.createElement('button');
   playBtn.textContent = '⏸'; playBtn.style.cssText = 'background:none;border:2px solid #c4a882;color:#c4a882;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:48px;';
   scrubDiv.appendChild(playBtn);
+  // Speed buttons
+  const speedBtnStyle = (active) => `background:${active?'#c4a882':'none'};border:2px solid #c4a882;color:${active?'#000':'#c4a882'};padding:10px 28px;border-radius:8px;cursor:pointer;font-size:48px;font-family:monospace;font-weight:bold;min-width:100px;`;
+  const speeds = [1, 2, 5, 30];
+  const speedBtns = [];
+  function updateSpeedBtns() { speedBtns.forEach((b,i) => { b.style.cssText = speedBtnStyle(timeScale === speeds[i]); }); info.style.color = timeScale > 1 ? (timeScale>=30?'#ff6666':timeScale>=5?'#ffaa44':'#66bbff') : '#c4a882'; }
+  speeds.forEach(s => {
+    const b = document.createElement('button');
+    b.textContent = s + 'x';
+    b.onclick = () => { timeScale = timeScale === s ? 1 : s; updateSpeedBtns(); };
+    speedBtns.push(b);
+    scrubDiv.appendChild(b);
+  });
   scrubDiv.appendChild(slider);
   scrubDiv.appendChild(info);
   document.body.appendChild(scrubDiv);
 
   let liveT = 0, playing = true, scrubbing = false, timeScale = 1;
   let lastFrameTime = performance.now() / 1000;
+  updateSpeedBtns();
   playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? '⏸' : '▶'; };
   slider.oninput = () => { scrubbing = true; liveT = parseFloat(slider.value); };
   slider.onchange = () => { scrubbing = false; };
   document.addEventListener('keydown', e => {
     if (e.key === 't' || e.key === 'T') {
-      timeScale = timeScale === 30 ? 1 : 30;
-      info.style.color = timeScale > 1 ? '#ff6666' : '#c4a882';
+      timeScale = timeScale === 30 ? 1 : 30; updateSpeedBtns();
     }
     if (e.key === 'y' || e.key === 'Y') {
-      timeScale = timeScale === 5 ? 1 : 5;
-      info.style.color = timeScale > 1 ? '#ffaa44' : '#c4a882';
+      timeScale = timeScale === 5 ? 1 : 5; updateSpeedBtns();
     }
   });
 
