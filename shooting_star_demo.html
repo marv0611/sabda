@@ -15,7 +15,6 @@
 <script type="module">
 import * as THREE from 'three';
 
-// ── SETUP ──
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -58,61 +57,41 @@ starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
 const starMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false,
   vertexShader: `
-    attribute float size;
-    attribute vec3 color;
-    varying vec3 vColor;
+    attribute float size; attribute vec3 color; varying vec3 vColor;
     void main() {
       vColor = color;
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
       gl_PointSize = size * (300.0 / -mv.z);
       gl_Position = projectionMatrix * mv;
-    }
-  `,
+    }`,
   fragmentShader: `
     varying vec3 vColor;
     void main() {
       float d = length(gl_PointCoord - 0.5) * 2.0;
-      float core = exp(-d * d * 8.0);
-      float glow = exp(-d * d * 2.0) * 0.3;
-      float alpha = core + glow;
+      float alpha = exp(-d * d * 8.0) + exp(-d * d * 2.0) * 0.3;
       gl_FragColor = vec4(vColor, alpha * 0.7);
-    }
-  `,
+    }`,
 });
 scene.add(new THREE.Points(starGeo, starMat));
 
 // ── SKY DOME ──
-const skyMat = new THREE.ShaderMaterial({
-  side: THREE.BackSide, depthWrite: false,
-  vertexShader: `
-    varying vec3 vWorldPos;
-    void main() {
-      vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    varying vec3 vWorldPos;
-    void main() {
-      float y = normalize(vWorldPos).y;
-      vec3 zenith = vec3(0.02, 0.02, 0.06);
-      vec3 horizon = vec3(0.05, 0.04, 0.08);
-      vec3 below = vec3(0.01, 0.01, 0.02);
-      vec3 col = y > 0.0 ? mix(horizon, zenith, smoothstep(0.0, 0.6, y))
-                          : mix(horizon, below, smoothstep(0.0, -0.3, y));
-      gl_FragColor = vec4(col, 1.0);
-    }
-  `,
-});
-scene.add(new THREE.Mesh(new THREE.SphereGeometry(390, 32, 32), skyMat));
+scene.add(new THREE.Mesh(
+  new THREE.SphereGeometry(390, 32, 32),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false,
+    vertexShader: `varying vec3 vWP; void main(){ vWP=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: `varying vec3 vWP; void main(){
+      float y=normalize(vWP).y;
+      vec3 col=y>0.0? mix(vec3(0.05,0.04,0.08),vec3(0.02,0.02,0.06),smoothstep(0.0,0.6,y))
+                     : mix(vec3(0.05,0.04,0.08),vec3(0.01,0.01,0.02),smoothstep(0.0,-0.3,y));
+      gl_FragColor=vec4(col,1.0); }`,
+  })
+));
 
 // ── SHOOTING STAR SYSTEM ──
-// Exact same rendering as murmuration scene
+// No dome reprojection — stars fly in straight lines like real meteors
 const MAX_STARS = 8;
-const SS_SEGMENTS = 12;
-const DOME_R = 340;
-const _velDir = new THREE.Vector3();
-const _segPos = new THREE.Vector3();
+const SS_SEGMENTS = 14;
 
 function createShootingStar() {
   const geo = new THREE.BufferGeometry();
@@ -121,49 +100,35 @@ function createShootingStar() {
   const indices = [];
   for (let i = 0; i <= SS_SEGMENTS; i++) {
     const t = i / SS_SEGMENTS;
-    uvs[i*4] = 0; uvs[i*4+1] = t;
-    uvs[i*4+2] = 1; uvs[i*4+3] = t;
-    if (i < SS_SEGMENTS) {
-      const b = i * 2;
-      indices.push(b, b+1, b+2, b+1, b+3, b+2);
-    }
+    uvs[i*4] = 0; uvs[i*4+1] = t; uvs[i*4+2] = 1; uvs[i*4+3] = t;
+    if (i < SS_SEGMENTS) { const b = i*2; indices.push(b,b+1,b+2,b+1,b+3,b+2); }
   }
   geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
   geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
-    uniforms: {
-      uOpacity: { value: 1.0 },
-      uColor: { value: new THREE.Color(1, 0.98, 0.9) },
-    },
-    vertexShader: `
-      varying vec2 vUv;
-      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-    `,
-    fragmentShader: `
-      precision highp float;
-      uniform float uOpacity;
-      uniform vec3 uColor;
-      varying vec2 vUv;
-      void main() {
-        float headGlow = pow(vUv.y, 2.5);
-        float cx = abs(vUv.x - 0.5) * 2.0;
-        float core = pow(max(0.0, 1.0 - cx), 6.0);
-        float glow = pow(max(0.0, 1.0 - cx), 1.8) * 0.25;
-        float centerLine = core + glow;
-        float headBoost = smoothstep(0.88, 1.0, vUv.y) * 0.7;
-        float alpha = headGlow * centerLine * uOpacity + headBoost * uOpacity * core;
-        gl_FragColor = vec4(uColor, clamp(alpha, 0.0, 1.0));
-      }
-    `,
+    uniforms: { uOpacity:{value:1.0}, uColor:{value:new THREE.Color(1,0.98,0.9)} },
+    vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: `precision highp float; uniform float uOpacity; uniform vec3 uColor; varying vec2 vUv;
+      void main(){
+        float headGlow=pow(vUv.y,2.5);
+        float cx=abs(vUv.x-0.5)*2.0;
+        float core=pow(max(0.0,1.0-cx),6.0);
+        float glow=pow(max(0.0,1.0-cx),1.8)*0.25;
+        float headBoost=smoothstep(0.88,1.0,vUv.y)*0.7;
+        float alpha=headGlow*(core+glow)*uOpacity+headBoost*uOpacity*core;
+        gl_FragColor=vec4(uColor,clamp(alpha,0.0,1.0));
+      }`,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.visible = false; mesh.frustumCulled = false;
   scene.add(mesh);
   return { mesh, geo, mat, active: false,
-    pos: new THREE.Vector3(), vel: new THREE.Vector3(),
-    life: 0, maxLife: 0, tailBonus: 0 };
+    headPos: new THREE.Vector3(), vel: new THREE.Vector3(),
+    life: 0, maxLife: 0, tailLen: 0,
+    // Store trail positions for smooth curved tail
+    trail: [] };
 }
 
 const shootingStars = [];
@@ -171,36 +136,45 @@ for (let i = 0; i < MAX_STARS; i++) shootingStars.push(createShootingStar());
 
 let spawnInterval = 1.0;
 let spawnTimer = 0.3;
+const _side = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
 
 function spawnStar() {
   const ss = shootingStars.find(s => !s.active);
   if (!ss) return;
   ss.active = true;
 
-  // Vary: 40% long dramatic streaks, 60% short quick ones
   const isLong = Math.random() < 0.4;
-  ss.tailBonus = isLong ? (300 + Math.random() * 400) : (120 + Math.random() * 180);
-  ss.maxLife  = isLong ? (3.0 + Math.random() * 2.5) : (1.8 + Math.random() * 1.5);
+  ss.tailLen = isLong ? (60 + Math.random() * 80) : (25 + Math.random() * 35);
+  ss.maxLife = isLong ? (2.5 + Math.random() * 2.0) : (1.2 + Math.random() * 1.2);
   ss.life = ss.maxLife;
 
-  // Spawn in upper sky — exactly like murmuration
+  // Spawn on a sphere at R=340, upper hemisphere only (elevation 20-60°)
   const sTheta = Math.random() * Math.PI * 2;
-  const sElev = (25 + Math.random() * 30) * Math.PI / 180; // 25-55° upper sky
-  ss.pos.set(
-    Math.cos(sElev) * Math.cos(sTheta) * DOME_R,
-    Math.sin(sElev) * DOME_R,
-    Math.cos(sElev) * Math.sin(sTheta) * DOME_R
+  const sElev = (20 + Math.random() * 40) * Math.PI / 180;
+  const R = 340;
+  ss.headPos.set(
+    Math.cos(sElev) * Math.cos(sTheta) * R,
+    Math.sin(sElev) * R,
+    Math.cos(sElev) * Math.sin(sTheta) * R
   );
 
-  // Steep descent — always clearly falling downward
-  const entryAngle = (25 + Math.random() * 35) * Math.PI / 180; // 25-60° steep
-  const travelTheta = sTheta + 0.5 + Math.random() * 1.5;
-  const speed = 100 + Math.random() * 80; // slower = more graceful arc
+  // Velocity: ALWAYS falls down (negative Y) with a diagonal sweep
+  // Fall angle 15-35° from horizontal = nice diagonal, never vertical, never flat
+  const fallAngle = (15 + Math.random() * 20) * Math.PI / 180;
+  // Horizontal direction — sweep across the sky
+  const sweepDir = sTheta + (Math.random() < 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.2);
+  const speed = 80 + Math.random() * 60;
+  const hSpeed = Math.cos(fallAngle) * speed;
+  const vSpeed = Math.sin(fallAngle) * speed;
   ss.vel.set(
-    Math.cos(travelTheta) * Math.cos(entryAngle) * speed,
-    -Math.sin(entryAngle) * speed,
-    Math.sin(travelTheta) * Math.cos(entryAngle) * speed
+    Math.cos(sweepDir) * hSpeed,
+    -vSpeed,                        // ALWAYS negative = ALWAYS falls
+    Math.sin(sweepDir) * hSpeed
   );
+
+  // Clear trail
+  ss.trail = [ss.headPos.clone()];
   ss.mesh.visible = true;
 }
 
@@ -209,41 +183,50 @@ function updateStar(ss, dt) {
   ss.life -= dt;
   const progress = 1 - ss.life / ss.maxLife;
 
-  // Opacity envelope — exact same as murmuration
+  // Opacity envelope
   let opacity;
   if (progress < 0.05) opacity = progress / 0.05;
-  else if (progress < 0.6) opacity = 1.0;
-  else opacity = Math.pow((1 - progress) / 0.4, 0.7);
+  else if (progress < 0.55) opacity = 1.0;
+  else opacity = Math.pow((1 - progress) / 0.45, 0.7);
   opacity = Math.max(0, opacity);
 
-  // Move head then re-project to dome — creates natural arc
-  ss.pos.addScaledVector(ss.vel, dt);
-  ss.pos.normalize().multiplyScalar(DOME_R);
+  // Move head in straight line — no dome reprojection
+  ss.headPos.addScaledVector(ss.vel, dt);
+  // Keep on sphere surface (just for distance consistency, not direction change)
+  ss.headPos.normalize().multiplyScalar(340);
 
-  // Multi-segment streak: sample points backward along trajectory on dome surface
-  const tailAngle = 0.65 + ss.tailBonus * 0.003;
-  const velDir = _velDir.copy(ss.vel).normalize();
+  // Record trail point
+  ss.trail.push(ss.headPos.clone());
+  // Keep enough trail points
+  if (ss.trail.length > SS_SEGMENTS + 5) ss.trail.shift();
+
+  // Build streak geometry from head backward along velocity
+  const velDir = _side.copy(ss.vel).normalize(); // reuse temp
   const p = ss.geo.attributes.position.array;
-  const hw = 1.5;
+  const hw = 1.2 + (ss.tailLen > 50 ? 0.5 : 0); // slightly wider for long ones
+
   for (let i = 0; i <= SS_SEGMENTS; i++) {
     const t = i / SS_SEGMENTS; // 0=tail, 1=head
-    // Walk backward from head along velocity direction, project onto dome
-    const stepBack = tailAngle * (1 - t);
-    const segPos = _segPos.copy(ss.pos).addScaledVector(velDir, -stepBack * DOME_R);
-    segPos.normalize().multiplyScalar(DOME_R);
-    const px = segPos.x, py = segPos.y, pz = segPos.z;
-    // Radial direction
-    const radLen = Math.sqrt(px*px + py*py + pz*pz);
-    const rx = px/radLen, ry = py/radLen, rz = pz/radLen;
-    // Side vector: cross(velocity, radial) — perpendicular to streak on dome
-    let sx = velDir.y*rz - velDir.z*ry;
-    let sy = velDir.z*rx - velDir.x*rz;
-    let sz = velDir.x*ry - velDir.y*rx;
+    // Point along the streak: head - (1-t) * tailLen in velocity direction
+    const stepBack = ss.tailLen * (1 - t);
+    const px = ss.headPos.x - velDir.x * stepBack;
+    const py = ss.headPos.y - velDir.y * stepBack;
+    const pz = ss.headPos.z - velDir.z * stepBack;
+
+    // Side vector perpendicular to velocity and up
+    let sx = velDir.y * _up.z - velDir.z * _up.y;
+    let sy = velDir.z * _up.x - velDir.x * _up.z;
+    let sz = velDir.x * _up.y - velDir.y * _up.x;
     const sLen = Math.sqrt(sx*sx + sy*sy + sz*sz) || 1;
     sx /= sLen; sy /= sLen; sz /= sLen;
+
+    // Taper: tail narrows to nothing, head is full width
+    const taper = Math.pow(t, 0.4);
+    const w = hw * taper;
+
     const idx = i * 2 * 3;
-    p[idx]   = px + sx * hw; p[idx+1] = py + sy * hw; p[idx+2] = pz + sz * hw;
-    p[idx+3] = px - sx * hw; p[idx+4] = py - sy * hw; p[idx+5] = pz - sz * hw;
+    p[idx]   = px + sx * w; p[idx+1] = py + sy * w; p[idx+2] = pz + sz * w;
+    p[idx+3] = px - sx * w; p[idx+4] = py - sy * w; p[idx+5] = pz - sz * w;
   }
   ss.geo.attributes.position.needsUpdate = true;
   ss.mesh.position.set(0, 0, 0);
@@ -254,32 +237,27 @@ function updateStar(ss, dt) {
   if (ss.life <= 0) { ss.active = false; ss.mesh.visible = false; }
 }
 
-// ── SLOW CAMERA DRIFT ──
-let camTheta = 0, camPhi = 0.3;
+// ── CAMERA — looks upward, very slow drift ──
+let camTheta = 0;
 
 // ── CONTROLS ──
-const controlDiv = document.createElement('div');
-controlDiv.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.6);padding:8px 16px;border-radius:8px;font-family:monospace;';
-const btnStyle = (active) => `background:${active?'#c4a882':'none'};border:1px solid #c4a882;color:${active?'#000':'#c4a882'};padding:5px 14px;border-radius:5px;cursor:pointer;font-size:14px;font-family:monospace;font-weight:bold;`;
-
-const label = document.createElement('span');
-label.textContent = 'EVERY';
-label.style.cssText = 'color:#c4a882;font-size:12px;';
-controlDiv.appendChild(label);
-
-const intervals = [0.5, 1, 2];
-const intervalLabels = ['0.5s', '1s', '2s'];
-const btns = [];
-function updateBtns() { btns.forEach((b, i) => b.style.cssText = btnStyle(spawnInterval === intervals[i])); }
-intervals.forEach((iv, i) => {
+const cd = document.createElement('div');
+cd.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,0.5);padding:6px 14px;border-radius:6px;font-family:monospace;';
+const bs = (a) => `background:${a?'#c4a882':'none'};border:1px solid #c4a882;color:${a?'#000':'#c4a882'};padding:4px 12px;border-radius:4px;cursor:pointer;font-size:13px;font-family:monospace;font-weight:bold;`;
+const lb = document.createElement('span');
+lb.textContent = 'EVERY';
+lb.style.cssText = 'color:#c4a882;font-size:11px;';
+cd.appendChild(lb);
+const ivs = [0.5, 1, 2], ivl = ['0.5s','1s','2s'], btns = [];
+function ub() { btns.forEach((b,i) => b.style.cssText = bs(spawnInterval === ivs[i])); }
+ivs.forEach((v,i) => {
   const b = document.createElement('button');
-  b.textContent = intervalLabels[i];
-  b.onclick = () => { spawnInterval = iv; updateBtns(); };
-  btns.push(b);
-  controlDiv.appendChild(b);
+  b.textContent = ivl[i];
+  b.onclick = () => { spawnInterval = v; ub(); };
+  btns.push(b); cd.appendChild(b);
 });
-document.body.appendChild(controlDiv);
-updateBtns();
+document.body.appendChild(cd);
+ub();
 
 // ── LOOP ──
 let lastTime = performance.now() / 1000;
@@ -290,20 +268,19 @@ function animate() {
   const dt = Math.min(now - lastTime, 0.1);
   lastTime = now;
 
-  // Gentle camera drift — look upward at the sky
-  camTheta += dt * 0.008;
-  camPhi = 0.55 + Math.sin(now * 0.03) * 0.05; // more upward
+  // Camera: slow pan, looking upward at ~35° elevation
+  camTheta += dt * 0.006;
+  const elev = 0.6; // ~35° up
   camera.lookAt(
-    Math.cos(camPhi) * Math.cos(camTheta) * 100,
-    Math.sin(camPhi) * 100,
-    Math.cos(camPhi) * Math.sin(camTheta) * 100
+    Math.cos(elev) * Math.cos(camTheta) * 100,
+    Math.sin(elev) * 100,
+    Math.cos(elev) * Math.sin(camTheta) * 100
   );
 
   // Twinkle
   const sizes = starGeo.attributes.size.array;
   for (let i = 0; i < STAR_COUNT; i++) {
-    const base = 1.0 + (i % 7) * 0.4;
-    sizes[i] = base + Math.sin(now * (1.5 + (i % 11) * 0.3) + i * 0.7) * 0.5;
+    sizes[i] = (1.0 + (i%7)*0.4) + Math.sin(now*(1.5+(i%11)*0.3)+i*0.7)*0.5;
   }
   starGeo.attributes.size.needsUpdate = true;
 
@@ -314,9 +291,7 @@ function animate() {
     spawnTimer = spawnInterval * (0.7 + Math.random() * 0.6);
   }
 
-  // Update all
   for (const ss of shootingStars) updateStar(ss, dt);
-
   renderer.render(scene, camera);
 }
 animate();
