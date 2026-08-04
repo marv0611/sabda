@@ -179,8 +179,8 @@ function spawnStar() {
 
   // Vary: 40% long dramatic streaks, 60% short quick ones
   const isLong = Math.random() < 0.4;
-  ss.tailBonus = isLong ? (200 + Math.random() * 300) : (80 + Math.random() * 100);
-  ss.maxLife  = isLong ? (2.5 + Math.random() * 2.0) : (1.5 + Math.random() * 1.5);
+  ss.tailBonus = isLong ? (300 + Math.random() * 400) : (120 + Math.random() * 180);
+  ss.maxLife  = isLong ? (3.0 + Math.random() * 2.5) : (1.8 + Math.random() * 1.5);
   ss.life = ss.maxLife;
 
   // Spawn in upper sky — exactly like murmuration
@@ -192,10 +192,10 @@ function spawnStar() {
     Math.cos(sElev) * Math.sin(sTheta) * DOME_R
   );
 
-  // Steep descent — always clearly falling, never flat
-  const entryAngle = (12 + Math.random() * 20) * Math.PI / 180; // 12-32°
-  const travelTheta = sTheta + 0.3 + Math.random() * 2.0;
-  const speed = 140 + Math.random() * 120;
+  // Steep descent — always clearly falling downward
+  const entryAngle = (25 + Math.random() * 35) * Math.PI / 180; // 25-60° steep
+  const travelTheta = sTheta + 0.5 + Math.random() * 1.5;
+  const speed = 100 + Math.random() * 80; // slower = more graceful arc
   ss.vel.set(
     Math.cos(travelTheta) * Math.cos(entryAngle) * speed,
     -Math.sin(entryAngle) * speed,
@@ -259,12 +259,12 @@ let camTheta = 0, camPhi = 0.3;
 
 // ── CONTROLS ──
 const controlDiv = document.createElement('div');
-controlDiv.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:16px;background:rgba(0,0,0,0.7);padding:20px 36px;border-radius:12px;font-family:monospace;';
-const btnStyle = (active) => `background:${active?'#c4a882':'none'};border:2px solid #c4a882;color:${active?'#000':'#c4a882'};padding:14px 36px;border-radius:8px;cursor:pointer;font-size:40px;font-family:monospace;font-weight:bold;`;
+controlDiv.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.6);padding:8px 16px;border-radius:8px;font-family:monospace;';
+const btnStyle = (active) => `background:${active?'#c4a882':'none'};border:1px solid #c4a882;color:${active?'#000':'#c4a882'};padding:5px 14px;border-radius:5px;cursor:pointer;font-size:14px;font-family:monospace;font-weight:bold;`;
 
 const label = document.createElement('span');
 label.textContent = 'EVERY';
-label.style.cssText = 'color:#c4a882;font-size:32px;';
+label.style.cssText = 'color:#c4a882;font-size:12px;';
 controlDiv.appendChild(label);
 
 const intervals = [0.5, 1, 2];
@@ -291,8 +291,8 @@ function animate() {
   lastTime = now;
 
   // Gentle camera drift — look upward at the sky
-  camTheta += dt * 0.012;
-  camPhi = 0.35 + Math.sin(now * 0.04) * 0.08;
+  camTheta += dt * 0.008;
+  camPhi = 0.55 + Math.sin(now * 0.03) * 0.05; // more upward
   camera.lookAt(
     Math.cos(camPhi) * Math.cos(camTheta) * 100,
     Math.sin(camPhi) * 100,
