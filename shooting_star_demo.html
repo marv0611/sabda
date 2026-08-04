@@ -144,9 +144,9 @@ function spawnStar() {
   if (!ss) return;
   ss.active = true;
 
-  const isLong = Math.random() < 0.4;
-  ss.tailLen = isLong ? (60 + Math.random() * 80) : (25 + Math.random() * 35);
-  ss.maxLife = isLong ? (2.5 + Math.random() * 2.0) : (1.2 + Math.random() * 1.2);
+  const isLong = Math.random() < 0.55;
+  ss.tailLen = isLong ? (140 + Math.random() * 180) : (40 + Math.random() * 50);
+  ss.maxLife = isLong ? (3.0 + Math.random() * 2.5) : (1.2 + Math.random() * 1.0);
   ss.life = ss.maxLife;
 
   // Spawn on a sphere at R=340, upper hemisphere only (elevation 20-60°)
@@ -161,7 +161,7 @@ function spawnStar() {
 
   // Velocity: ALWAYS falls down (negative Y) with a diagonal sweep
   // Fall angle 15-35° from horizontal = nice diagonal, never vertical, never flat
-  const fallAngle = (15 + Math.random() * 20) * Math.PI / 180;
+  const fallAngle = (30 + Math.random() * 20) * Math.PI / 180;
   // Horizontal direction — sweep across the sky
   const sweepDir = sTheta + (Math.random() < 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.2);
   const speed = 80 + Math.random() * 60;
