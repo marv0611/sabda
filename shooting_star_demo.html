@@ -82,8 +82,8 @@ scene.add(new THREE.Mesh(
     vertexShader: `varying vec3 vWP; void main(){ vWP=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
     fragmentShader: `varying vec3 vWP; void main(){
       float y=normalize(vWP).y;
-      vec3 col=y>0.0? mix(vec3(0.05,0.04,0.08),vec3(0.02,0.02,0.06),smoothstep(0.0,0.6,y))
-                     : mix(vec3(0.05,0.04,0.08),vec3(0.01,0.01,0.02),smoothstep(0.0,-0.3,y));
+      vec3 col=y>0.0? mix(vec3(0.06,0.06,0.14),vec3(0.03,0.03,0.10),smoothstep(0.0,0.6,y))
+                     : mix(vec3(0.06,0.06,0.14),vec3(0.02,0.02,0.06),smoothstep(0.0,-0.3,y));
       gl_FragColor=vec4(col,1.0); }`,
   })
 ));
@@ -248,7 +248,7 @@ const lb = document.createElement('span');
 lb.textContent = 'EVERY';
 lb.style.cssText = 'color:#c4a882;font-size:11px;';
 cd.appendChild(lb);
-const ivs = [0.5, 1, 2], ivl = ['0.5s','1s','2s'], btns = [];
+const ivs = [0.25, 0.5, 1, 2], ivl = ['0.25s','0.5s','1s','2s'], btns = [];
 function ub() { btns.forEach((b,i) => b.style.cssText = bs(spawnInterval === ivs[i])); }
 ivs.forEach((v,i) => {
   const b = document.createElement('button');
